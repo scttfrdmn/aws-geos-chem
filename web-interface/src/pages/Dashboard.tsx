@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../store';
 import { fetchSimulations } from '../store/slices/simulationsSlice';
-import { fetchRealTimeCost } from '../store/slices/costSlice';
+import { fetchRealTimeCost, fetchOptimizationRecommendations } from '../store/slices/costSlice';
+import CostOptimizationWidget from '../components/cost/CostOptimizationWidget';
 
 // MUI components
 import {
@@ -52,12 +53,13 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     dispatch(fetchSimulations());
     dispatch(fetchRealTimeCost());
-    
+    dispatch(fetchOptimizationRecommendations({}) as any);
+
     // Set up real-time cost polling
     const costInterval = setInterval(() => {
       dispatch(fetchRealTimeCost());
     }, 60000); // Update every minute
-    
+
     return () => clearInterval(costInterval);
   }, [dispatch]);
   
@@ -217,7 +219,7 @@ const Dashboard: React.FC = () => {
           </Paper>
         </Grid>
         
-        {/* Statistics */}
+        {/* Statistics and Cost Optimization */}
         <Grid item xs={12}>
           <Grid container spacing={3}>
             <Grid item xs={12} sm={6} md={3}>
@@ -232,7 +234,7 @@ const Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
             </Grid>
-            
+
             <Grid item xs={12} sm={6} md={3}>
               <Card>
                 <CardContent>
@@ -245,7 +247,7 @@ const Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
             </Grid>
-            
+
             <Grid item xs={12} sm={6} md={3}>
               <Card>
                 <CardContent>
@@ -258,7 +260,7 @@ const Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
             </Grid>
-            
+
             <Grid item xs={12} sm={6} md={3}>
               <Card>
                 <CardContent>
@@ -272,6 +274,11 @@ const Dashboard: React.FC = () => {
               </Card>
             </Grid>
           </Grid>
+        </Grid>
+
+        {/* Cost Optimization Widget */}
+        <Grid item xs={12} md={4}>
+          <CostOptimizationWidget />
         </Grid>
         
         {/* Recent simulations */}

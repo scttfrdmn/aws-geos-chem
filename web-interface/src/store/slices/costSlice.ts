@@ -23,6 +23,35 @@ export interface CostItem {
   updatedAt: string;
 }
 
+export interface Recommendation {
+  type: string;
+  currentValue?: string;
+  recommendedValue?: string;
+  description: string;
+  potentialSavingsPercent?: number;
+  impact: 'low' | 'medium' | 'high';
+}
+
+export interface OptimizationRecommendation {
+  simulationId?: string;
+  name?: string;
+  currentCost?: number;
+  recommendations: Recommendation[];
+  generatedAt: string;
+  userId?: string;
+  simulationCount?: number;
+  recommendationTypes?: string[];
+}
+
+export interface OptimizationSummary {
+  totalPotentialSavings: number;
+  totalPotentialSavingsPercent: number;
+  highImpactCount: number;
+  mediumImpactCount: number;
+  lowImpactCount: number;
+  byType: Record<string, number>;
+}
+
 export interface Budget {
   userId: string;
   budgetId: string;
@@ -47,6 +76,11 @@ interface CostState {
     costByResource: Record<string, number>;
     costByDay: Record<string, number>;
   };
+  optimizationRecommendations: {
+    userRecommendations: OptimizationRecommendation | null;
+    simulationRecommendations: Record<string, OptimizationRecommendation>;
+    summary: OptimizationSummary | null;
+  };
   loading: boolean;
   error: string | null;
   submitting: boolean;
@@ -61,6 +95,11 @@ const initialState: CostState = {
     forecastedCost: 0,
     costByResource: {},
     costByDay: {}
+  },
+  optimizationRecommendations: {
+    userRecommendations: null,
+    simulationRecommendations: {},
+    summary: null
   },
   loading: false,
   error: null,
@@ -163,6 +202,66 @@ export const deleteBudget = createAsyncThunk(
       return budgetId;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to delete budget');
+    }
+  }
+);
+
+export const fetchOptimizationRecommendations = createAsyncThunk(
+  'cost/fetchOptimizationRecommendations',
+  async (
+    { type }: { type?: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.get('GeosChemAPI', '/api/costs/optimization', {
+        queryStringParameters: {
+          type: type || 'all'
+        }
+      });
+      return response;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to fetch optimization recommendations');
+    }
+  }
+);
+
+export const fetchSimulationOptimizations = createAsyncThunk(
+  'cost/fetchSimulationOptimizations',
+  async (simulationId: string, { rejectWithValue }) => {
+    try {
+      const response = await API.get('GeosChemAPI', '/api/costs/optimization', {
+        queryStringParameters: {
+          simulationId
+        }
+      });
+      return {
+        simulationId,
+        recommendations: response.recommendations
+      };
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to fetch simulation optimization recommendations');
+    }
+  }
+);
+
+export const applyOptimizationRecommendation = createAsyncThunk(
+  'cost/applyOptimizationRecommendation',
+  async (
+    { simulationId, recommendationType, recommendationId }:
+    { simulationId: string; recommendationType: string; recommendationId: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.post('GeosChemAPI', '/api/costs/optimization/apply', {
+        body: {
+          simulationId,
+          recommendationType,
+          recommendationId
+        }
+      });
+      return response;
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to apply optimization recommendation');
     }
   }
 );
@@ -307,9 +406,129 @@ const costSlice = createSlice({
       .addCase(deleteBudget.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
+      })
+
+      // Fetch Optimization Recommendations
+      .addCase(fetchOptimizationRecommendations.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchOptimizationRecommendations.fulfilled, (state, action) => {
+        // Set the user recommendations
+        state.optimizationRecommendations.userRecommendations = action.payload.recommendations;
+
+        // Calculate optimization summary
+        if (action.payload.recommendations && action.payload.recommendations.recommendations) {
+          const recommendations = action.payload.recommendations.recommendations;
+
+          let totalSavings = 0;
+          let highCount = 0;
+          let mediumCount = 0;
+          let lowCount = 0;
+          const byType: Record<string, number> = {};
+
+          // Process all recommendation types
+          Object.keys(recommendations).forEach(type => {
+            const typeRecs = recommendations[type];
+            if (!Array.isArray(typeRecs)) return;
+
+            typeRecs.forEach(rec => {
+              // Count by impact
+              if (rec.impact === 'high') highCount++;
+              else if (rec.impact === 'medium') mediumCount++;
+              else if (rec.impact === 'low') lowCount++;
+
+              // Count by type
+              if (!byType[rec.type]) byType[rec.type] = 0;
+              byType[rec.type]++;
+
+              // Add potential savings
+              if (rec.potentialSavingsPercent) {
+                totalSavings += rec.potentialSavingsPercent;
+              }
+            });
+          });
+
+          // Set summary
+          state.optimizationRecommendations.summary = {
+            totalPotentialSavings: totalSavings,
+            totalPotentialSavingsPercent: state.summary.totalCost > 0
+              ? (totalSavings / 100) * state.summary.totalCost
+              : 0,
+            highImpactCount: highCount,
+            mediumImpactCount: mediumCount,
+            lowImpactCount: lowCount,
+            byType
+          };
+        }
+
+        state.loading = false;
+      })
+      .addCase(fetchOptimizationRecommendations.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+
+      // Fetch Simulation Optimizations
+      .addCase(fetchSimulationOptimizations.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchSimulationOptimizations.fulfilled, (state, action) => {
+        const { simulationId, recommendations } = action.payload;
+
+        // Set the simulation recommendations
+        state.optimizationRecommendations.simulationRecommendations[simulationId] = recommendations;
+
+        state.loading = false;
+      })
+      .addCase(fetchSimulationOptimizations.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+
+      // Apply Optimization Recommendation
+      .addCase(applyOptimizationRecommendation.pending, (state) => {
+        state.submitting = true;
+        state.error = null;
+      })
+      .addCase(applyOptimizationRecommendation.fulfilled, (state, action) => {
+        // Update applied recommendation status
+        const { simulationId, recommendationId, success } = action.payload;
+
+        if (success && simulationId && recommendationId) {
+          // Mark recommendation as applied if successful
+          const simRecs = state.optimizationRecommendations.simulationRecommendations[simulationId];
+          if (simRecs) {
+            // Find and update the recommendation
+            simRecs.recommendations = simRecs.recommendations.map(rec => {
+              // Assuming recommendationId matches the index or some unique identifier
+              if (rec.type === recommendationId) {
+                return { ...rec, applied: true };
+              }
+              return rec;
+            });
+          }
+        }
+
+        state.submitting = false;
+      })
+      .addCase(applyOptimizationRecommendation.rejected, (state, action) => {
+        state.submitting = false;
+        state.error = action.payload as string;
       });
   }
 });
 
-export const { clearError, resetCurrentBudget } = costSlice.actions;
+export const {
+  clearError,
+  resetCurrentBudget
+} = costSlice.actions;
+
+// Selectors
+export const selectOptimizationSummary = (state: { cost: CostState }) => state.cost.optimizationRecommendations.summary;
+export const selectUserRecommendations = (state: { cost: CostState }) => state.cost.optimizationRecommendations.userRecommendations;
+export const selectSimulationRecommendations = (simulationId: string) => (state: { cost: CostState }) =>
+  state.cost.optimizationRecommendations.simulationRecommendations[simulationId];
+
 export default costSlice.reducer;
