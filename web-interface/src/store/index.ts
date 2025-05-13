@@ -4,6 +4,8 @@ import simulationsReducer from './slices/simulationsSlice';
 import resultsReducer from './slices/resultsSlice';
 import costReducer from './slices/costSlice';
 import uiReducer from './slices/uiSlice';
+import batchReducer from './slices/batchSlice';
+import parameterStudyReducer from './slices/parameterStudySlice';
 
 export const store = configureStore({
   reducer: {
@@ -11,7 +13,9 @@ export const store = configureStore({
     simulations: simulationsReducer,
     results: resultsReducer,
     cost: costReducer,
-    ui: uiReducer
+    ui: uiReducer,
+    batch: batchReducer,
+    parameterStudy: parameterStudyReducer
   },
   devTools: process.env.NODE_ENV !== 'production'
 });

@@ -38,7 +38,9 @@ import {
   Logout as LogoutIcon,
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
-  Notifications as NotificationsIcon
+  Notifications as NotificationsIcon,
+  BatchPrediction as BatchIcon,
+  Tune as TuneIcon
 } from '@mui/icons-material';
 
 // Custom components
@@ -90,6 +92,8 @@ const MainLayout: React.FC = () => {
   const navItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
     { text: 'Simulations', icon: <ScienceIcon />, path: '/simulations' },
+    { text: 'Batch Processing', icon: <BatchIcon />, path: '/batches' },
+    { text: 'Parameter Studies', icon: <TuneIcon />, path: '/parameter-studies' },
     { text: 'Results', icon: <AssessmentIcon />, path: '/results' },
     { text: 'Cost & Usage', icon: <CostIcon />, path: '/costs' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/settings' }

@@ -14,6 +14,10 @@ import SimulationDetail from './pages/SimulationDetail';
 import NewSimulation from './pages/NewSimulation';
 import Results from './pages/Results';
 import ResultDetail from './pages/ResultDetail';
+import BatchSimulations from './pages/BatchSimulations';
+import BatchDetail from './pages/BatchDetail';
+import ParameterStudies from './pages/ParameterStudies';
+import ParameterStudyDetail from './pages/ParameterStudyDetail';
 import Account from './pages/Account';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -47,6 +51,10 @@ const App: React.FC = () => {
           <Route path="/new-simulation" element={<NewSimulation />} />
           <Route path="/results" element={<Results />} />
           <Route path="/results/:id" element={<ResultDetail />} />
+          <Route path="/batches" element={<BatchSimulations />} />
+          <Route path="/batches/:id" element={<BatchDetail />} />
+          <Route path="/parameter-studies" element={<ParameterStudies />} />
+          <Route path="/parameter-studies/:id" element={<ParameterStudyDetail />} />
           <Route path="/account" element={<Account />} />
         </Route>
 

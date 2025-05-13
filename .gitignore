@@ -71,3 +71,4 @@ temp/
 *.der
 *.p12
 *.pfx
+**/.claude/settings.local.json
