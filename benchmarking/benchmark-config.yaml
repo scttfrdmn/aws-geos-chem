@@ -1,0 +1,313 @@
+# GEOS-Chem Benchmarking Configuration
+# This file defines the benchmarks to be run for performance evaluation
+
+# Phase 1: Single-Node Baseline Benchmarks for GC Classic
+phase_1:
+  # Full Chemistry - Standard Resolution
+  - id: B1-1-G3-C7G-16-FC
+    description: "Full Chemistry on Graviton3 c7g.16xlarge"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "baseline throughput"
+
+  - id: B1-2-G3-C7G-8-FC
+    description: "Full Chemistry on Graviton3 c7g.8xlarge"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.8xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 32
+      memory_gb: 64
+    metrics_focus: "scaling efficiency"
+
+  - id: B1-3-IN-C6I-16-FC
+    description: "Full Chemistry on Intel c6i.16xlarge"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c6i.16xlarge
+      processor_type: Intel
+      architecture: x86_64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "processor comparison"
+
+  - id: B1-4-G3-C7G-16-FC-HR
+    description: "Full Chemistry (Higher Resolution) on Graviton3"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 2x2.5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "resolution impact"
+
+  - id: B1-5-G3-C7G-16-AER
+    description: "Aerosol-only on Graviton3"
+    application: gc-classic
+    simulation_type: aerosol
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "chemistry complexity impact"
+
+  - id: B1-6-G3-C7G-16-TRA
+    description: "Transport-only on Graviton3"
+    application: gc-classic
+    simulation_type: transport
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "transport-only performance"
+
+# Phase 2: Multi-Node GCHP Benchmarks
+phase_2:
+  - id: B2-1-G3E-HPC7G-2-FC-C24
+    description: "GCHP Full Chemistry C24 on 2 Graviton3E nodes"
+    application: gchp
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: c24
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc7g.16xlarge
+      processor_type: Graviton3E
+      architecture: arm64
+      nodes: 2
+      cores_per_node: 64
+      memory_gb: 128
+      network: efa
+    metrics_focus: "basic MPI scaling"
+
+  - id: B2-2-G3E-HPC7G-4-FC-C24
+    description: "GCHP Full Chemistry C24 on 4 Graviton3E nodes"
+    application: gchp
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: c24
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc7g.16xlarge
+      processor_type: Graviton3E
+      architecture: arm64
+      nodes: 4
+      cores_per_node: 64
+      memory_gb: 128
+      network: efa
+    metrics_focus: "node scaling"
+
+  - id: B2-3-G3E-HPC7G-2-FC-C90
+    description: "GCHP Full Chemistry C90 on 2 Graviton3E nodes"
+    application: gchp
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: c90
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc7g.16xlarge
+      processor_type: Graviton3E
+      architecture: arm64
+      nodes: 2
+      cores_per_node: 64
+      memory_gb: 128
+      network: efa
+    metrics_focus: "resolution impact"
+
+  - id: B2-4-IN-HPC6A-2-FC-C90
+    description: "GCHP Full Chemistry C90 on 2 Intel HPC nodes"
+    application: gchp
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: c90
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc6a.48xlarge
+      processor_type: Intel
+      architecture: x86_64
+      nodes: 2
+      cores_per_node: 48
+      memory_gb: 96
+      network: efa
+    metrics_focus: "processor comparison"
+
+  - id: B2-5-G3E-HPC7G-2-AER-C90
+    description: "GCHP Aerosol-only C90 on 2 Graviton3E nodes"
+    application: gchp
+    simulation_type: aerosol
+    domain:
+      type: global
+      resolution: c90
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc7g.16xlarge
+      processor_type: Graviton3E
+      architecture: arm64
+      nodes: 2
+      cores_per_node: 64
+      memory_gb: 128
+      network: efa
+    metrics_focus: "chemistry complexity impact"
+
+# Phase 3: Specialized Benchmarks
+phase_3:
+  - id: B3-1-G3-C7G-16-FC-NA
+    description: "Nested Domain (North America) on Graviton3"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: nested
+      region: NA
+      resolution: 0.5x0.625
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "regional modeling performance"
+
+  - id: B3-2-G3-R7G-16-FC
+    description: "Memory-Optimized Full Chemistry on Graviton3"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: r7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 512
+    metrics_focus: "memory impact"
+
+  - id: B3-3-G3-C7G-16-CO2
+    description: "CO2 Simulation (I/O Intensive) on Graviton3"
+    application: gc-classic
+    simulation_type: co2
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "I/O performance"
+
+  - id: B3-4-G4-C8G-16-FC
+    description: "Full Chemistry on Graviton4 c8g"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 7
+    hardware:
+      instance_type: c8g.16xlarge
+      processor_type: Graviton4
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "Graviton generation comparison"
+
+# Phase 4: Real-World Simulation Scenarios
+phase_4:
+  - id: B4-1-G3-C7G-16-FC-YEAR
+    description: "Annual Full Chemistry Simulation"
+    application: gc-classic
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: 4x5
+    duration:
+      days: 31  # Run for 1 month, then extrapolate to a year
+    hardware:
+      instance_type: c7g.16xlarge
+      processor_type: Graviton3
+      architecture: arm64
+      vcpus: 64
+      memory_gb: 128
+    metrics_focus: "long-term stability"
+
+  - id: B4-2-G3E-HPC7G-4-FC-C180
+    description: "High-Resolution GCHP Simulation"
+    application: gchp
+    simulation_type: fullchem
+    domain:
+      type: global
+      resolution: c180
+    duration:
+      days: 1
+    hardware:
+      instance_type: hpc7g.16xlarge
+      processor_type: Graviton3E
+      architecture: arm64
+      nodes: 4
+      cores_per_node: 64
+      memory_gb: 128
+      network: efa
+    metrics_focus: "high-resolution performance"

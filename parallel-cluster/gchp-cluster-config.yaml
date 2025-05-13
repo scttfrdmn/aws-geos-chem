@@ -1,0 +1,124 @@
+Region: ${AWS_REGION}
+Image:
+  Os: ubuntu2204
+  
+HeadNode:
+  InstanceType: c7g.2xlarge
+  Networking:
+    SubnetId: ${SUBNET_ID}
+  DisableSimultaneousMultithreading: true
+  Ssh:
+    KeyName: ${KEY_PAIR_NAME}
+  LocalStorage:
+    RootVolume:
+      Size: 200
+      VolumeType: gp3
+      Iops: 3000
+      Throughput: 125
+  Iam:
+    AdditionalIamPolicies:
+      - Policy: arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      - Policy: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: gchp-graviton
+      CapacityType: SPOT
+      AllocationStrategy: lowest-price
+      Networking:
+        SubnetIds:
+          - ${SUBNET_ID}
+        PlacementGroup:
+          Enabled: true
+          Name: gchp-placement-group
+      ComputeResources:
+        - Name: hpc7g
+          InstanceType: hpc7g.16xlarge
+          MinCount: 0
+          MaxCount: 8
+          DisableSimultaneousMultithreading: true
+          Efa:
+            Enabled: true
+            GdrSupport: false
+        - Name: c7g-16xl
+          InstanceType: c7g.16xlarge
+          MinCount: 0
+          MaxCount: 8
+          DisableSimultaneousMultithreading: true
+      CustomActions:
+        OnNodeConfigured:
+          Script: s3://${SCRIPTS_BUCKET}/gchp-node-setup.sh
+      ComputeSettings:
+        LocalStorage:
+          RootVolume:
+            Size: 200
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125
+    
+    - Name: gchp-x86
+      CapacityType: SPOT
+      AllocationStrategy: lowest-price
+      Networking:
+        SubnetIds:
+          - ${SUBNET_ID}
+        PlacementGroup:
+          Enabled: true
+          Name: gchp-x86-placement-group
+      ComputeResources:
+        - Name: hpc6a
+          InstanceType: hpc6a.48xlarge
+          MinCount: 0
+          MaxCount: 8
+          DisableSimultaneousMultithreading: true
+          Efa:
+            Enabled: true
+            GdrSupport: false
+        - Name: c6i-32xl
+          InstanceType: c6i.32xlarge
+          MinCount: 0
+          MaxCount: 8
+          DisableSimultaneousMultithreading: true
+      CustomActions:
+        OnNodeConfigured:
+          Script: s3://${SCRIPTS_BUCKET}/gchp-node-setup.sh
+      ComputeSettings:
+        LocalStorage:
+          RootVolume:
+            Size: 200
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125
+
+SharedStorage:
+  - Name: FsxLustre
+    StorageType: FsxLustre
+    MountDir: /fsx
+    FsxLustreSettings:
+      StorageCapacity: 1200
+      DeploymentType: SCRATCH_2
+      StorageType: SSD
+      PerUnitStorageThroughput: 125
+    
+  - Name: GEOSGRID
+    StorageType: Efs
+    MountDir: /gcgrid
+    EfsSettings:
+      ThroughputMode: bursting
+      PerformanceMode: generalPurpose
+      
+Monitoring:
+  Logs:
+    CloudWatch:
+      Enabled: true
+      RetentionInDays: 14
+  Dashboards:
+    CloudWatch:
+      Enabled: true
+
+Tags:
+  - Key: Project
+    Value: GEOS-Chem-Cloud-Runner
+  - Key: Environment
+    Value: ${ENVIRONMENT}
