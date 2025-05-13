@@ -24,8 +24,8 @@
     "cleanup": "node scripts/cleanup.js"
   },
   "keywords": ["aws", "cdk", "geos-chem", "cloud"],
-  "author": "",
-  "license": "ISC",
+  "author": "AWS GEOS-Chem Cloud Runner Contributors",
+  "license": "Apache-2.0",
   "type": "commonjs",
   "dependencies": {
     "@types/node": "^22.15.17",

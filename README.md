@@ -114,7 +114,7 @@ The [cost-tracking](./cost-tracking/) directory provides real-time cost monitori
 
 ## License
 
-ISC License
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](./LICENSE) file for details.
 
 ## Contributors
 
