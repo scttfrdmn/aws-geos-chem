@@ -1,0 +1,11 @@
+[flake8]
+max-line-length = 100
+extend-ignore = E203
+exclude = 
+    .git,
+    __pycache__,
+    build,
+    dist,
+    node_modules
+max-complexity = 10
+select = C,E,F,W,B,B950

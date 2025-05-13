@@ -96,13 +96,48 @@ The [cost-tracking](./cost-tracking/) directory provides real-time cost monitori
    ```bash
    # Deploy to development environment
    npm run deploy:dev
-   
-   # Or deploy to production
+
+   # Deploy with a specific AWS profile
+   npm run deploy:dev -- --profile=my-custom-profile
+
+   # Deploy to test or production environments
+   npm run deploy:test
    npm run deploy:prod
    ```
 
 4. **Running a Simulation**:
    After deployment, you can run simulations using the web interface or directly through the API.
+
+## Development
+
+### Linting
+
+The project includes linting for TypeScript, JavaScript, Python, and Bash scripts:
+
+```bash
+# From project root
+./scripts/lint_all.sh
+
+# From aws-geos-chem-cdk directory
+npm run lint        # TypeScript and JavaScript only
+npm run lint:py     # Python only
+npm run lint:bash   # Bash scripts only
+npm run lint:all    # All languages
+npm run lint:fix    # Fix auto-fixable issues in TypeScript and JavaScript
+```
+
+### AWS Profiles
+
+The project supports using different AWS profiles for different environments:
+
+1. **Configuration Files**: Each environment (dev, test, prod) has its own configuration in `aws-geos-chem-cdk/config/` that can specify a different AWS profile.
+
+2. **Command Line**: You can override the profile at runtime:
+   ```bash
+   npm run deploy:dev -- --profile=my-custom-profile
+   ```
+
+3. **Environment Variables**: Standard AWS environment variables are also respected.
 
 ## Documentation
 

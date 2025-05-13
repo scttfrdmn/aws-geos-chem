@@ -1,0 +1,14 @@
+# Turn on checks that are disabled by default
+enable=all
+
+# Allow using 'cd' to change directory
+disable=SC2164
+
+# Don't warn about unprefixed variables
+disable=SC2086
+
+# Allow local declarations without assignments
+disable=SC2155
+
+# Disable warning about readability with echo
+disable=SC2028

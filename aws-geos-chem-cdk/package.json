@@ -21,7 +21,14 @@
     "synth": "cdk synth",
     "diff": "cdk diff",
     "bootstrap": "cdk bootstrap",
-    "cleanup": "node scripts/cleanup.js"
+    "cleanup": "node scripts/cleanup.js",
+    "lint": "npm run lint:ts && npm run lint:js",
+    "lint:ts": "eslint --ext .ts .",
+    "lint:js": "eslint --ext .js .",
+    "lint:fix": "eslint --ext .ts,.js --fix .",
+    "lint:py": "flake8",
+    "lint:bash": "find .. -type f -name \"*.sh\" -exec shellcheck {} \\;",
+    "lint:all": "npm run lint && npm run lint:py && npm run lint:bash"
   },
   "keywords": ["aws", "cdk", "geos-chem", "cloud"],
   "author": "AWS GEOS-Chem Cloud Runner Contributors",
@@ -38,9 +45,12 @@
   },
   "devDependencies": {
     "@types/jest": "^29.5.4",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "aws-cdk-assert": "^2.0.0",
+    "eslint": "^8.46.0",
     "jest": "^29.6.4",
     "ts-jest": "^29.1.1",
-    "aws-cdk-assert": "^2.0.0",
     "ts-node": "^10.9.1"
   }
 }

@@ -16,6 +16,7 @@ const dotenv = require('dotenv');
 const CONFIG_DIR = path.join(__dirname, '..', 'config');
 const VALID_ENVIRONMENTS = ['dev', 'test', 'prod'];
 const DEFAULT_ENV = 'dev';
+const DEFAULT_PROFILE = 'default';
 
 /**
  * Load environment configuration
@@ -37,6 +38,7 @@ function loadEnvConfig(environment) {
     const defaultConfig = `# Default configuration for GEOS-Chem AWS Cloud Runner
 # Created: ${new Date().toISOString()}
 AWS_REGION=us-east-1
+AWS_PROFILE=default
 PROJECT_PREFIX=geos-chem
 VPC_CIDR=10.0.0.0/16
 MAX_AZS=2
@@ -111,23 +113,43 @@ function runPreDeploymentChecks(config) {
   
   // Check AWS credentials
   try {
-    const sts = new AWS.STS({ region: config.AWS_REGION });
-    const identity = execSync('aws sts get-caller-identity --output json', { encoding: 'utf8' });
+    // Configure AWS SDK with profile if specified
+    const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+    const awsOptions = { region: config.AWS_REGION };
+
+    if (awsProfile !== 'default') {
+      process.env.AWS_SDK_LOAD_CONFIG = 1; // Ensure SDK loads config from ~/.aws/config
+      AWS.config.credentials = new AWS.SharedIniFileCredentials({ profile: awsProfile });
+    }
+
+    const sts = new AWS.STS(awsOptions);
+
+    // Use the specified profile with AWS CLI as well
+    const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+    const identity = execSync(`aws sts get-caller-identity ${profileParam} --output json`, { encoding: 'utf8' });
+
     console.log(`Deploying as: ${JSON.parse(identity).Arn}`);
+    console.log(`Using AWS profile: ${awsProfile}`);
   } catch (error) {
-    console.error('Error getting AWS identity. Please check your AWS credentials.');
+    console.error('Error getting AWS identity. Please check your AWS credentials and profile settings.');
     console.error(error.message);
     process.exit(1);
   }
   
   // Check if environment is already bootstrapped
   try {
+    const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+    const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+
     console.log(`Checking if AWS CDK is bootstrapped in region ${config.AWS_REGION}...`);
     execSync(`cdk doctor`, { encoding: 'utf8' });
   } catch (error) {
     console.warn('CDK environment may not be bootstrapped. Running bootstrap...');
     try {
-      execSync(`cdk bootstrap aws://${process.env.CDK_DEFAULT_ACCOUNT}/${config.AWS_REGION}`, { 
+      const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+      const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+
+      execSync(`cdk bootstrap --profile ${awsProfile} aws://${process.env.CDK_DEFAULT_ACCOUNT}/${config.AWS_REGION}`, {
         encoding: 'utf8',
         stdio: 'inherit'
       });
@@ -157,25 +179,39 @@ function deployStacks(config, deployAll = false) {
   process.env.NAT_GATEWAYS = config.NAT_GATEWAYS;
   process.env.ENV = config.ENV;
   
+  // Get AWS profile configuration
+  const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+  const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+
   // Command to deploy all stacks or just the ones with changes
-  const deployCommand = deployAll 
-    ? `cdk deploy --all --require-approval never` 
-    : `cdk deploy --all --require-approval never --exclusively`;
-  
+  const deployCommand = deployAll
+    ? `cdk deploy --all --require-approval never ${profileParam}`
+    : `cdk deploy --all --require-approval never --exclusively ${profileParam}`;
+
   // Additional parameters based on environment
   const additionalParams = [];
-  
+
   if (config.ENV === 'prod') {
     // For production, add additional safety parameters
     additionalParams.push('--require-approval any-change');
   }
-  
+
+  // Set environment variables for the AWS SDK
+  if (awsProfile !== 'default') {
+    process.env.AWS_PROFILE = awsProfile;
+  }
+
   // Execute the deployment
   try {
     console.log(`Executing: ${deployCommand} ${additionalParams.join(' ')}`);
-    execSync(`${deployCommand} ${additionalParams.join(' ')}`, { 
+    execSync(`${deployCommand} ${additionalParams.join(' ')}`, {
       encoding: 'utf8',
-      stdio: 'inherit'
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        AWS_PROFILE: awsProfile,
+        AWS_SDK_LOAD_CONFIG: '1'
+      }
     });
     console.log(`\nDeployment to ${config.ENV} environment completed successfully!`);
   } catch (error) {
@@ -192,29 +228,46 @@ function main() {
   // Get the target environment from command line arguments
   const args = process.argv.slice(2);
   let environment = args[0] || DEFAULT_ENV;
-  
+
   // Validate the environment
   if (!VALID_ENVIRONMENTS.includes(environment)) {
     console.error(`Invalid environment: ${environment}`);
     console.error(`Valid environments are: ${VALID_ENVIRONMENTS.join(', ')}`);
     process.exit(1);
   }
-  
+
   // Parse additional flags
   const deployAll = args.includes('--all');
-  
+
+  // Parse --profile flag if provided
+  let customProfile = DEFAULT_PROFILE;
+  const profileFlagIndex = args.findIndex(arg => arg.startsWith('--profile='));
+  if (profileFlagIndex !== -1) {
+    customProfile = args[profileFlagIndex].split('=')[1];
+    if (!customProfile) {
+      console.error('Invalid profile format. Use --profile=<profile_name>');
+      process.exit(1);
+    }
+  }
+
   console.log(`=== GEOS-Chem AWS Cloud Runner Deployment ===`);
   console.log(`Target Environment: ${environment.toUpperCase()}`);
-  
+
   // Load environment configuration
   const config = loadEnvConfig(environment);
-  
+
+  // Override profile if provided via command line
+  if (customProfile !== DEFAULT_PROFILE) {
+    config.AWS_PROFILE = customProfile;
+    console.log(`Using AWS profile from command line: ${customProfile}`);
+  }
+
   // Update CDK tags
   updateCdkTags(config);
-  
+
   // Run pre-deployment checks
   runPreDeploymentChecks(config);
-  
+
   // Deploy the stacks
   deployStacks(config, deployAll);
 }

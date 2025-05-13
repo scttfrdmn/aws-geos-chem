@@ -17,6 +17,9 @@ const readline = require('readline');
 const { loadEnvConfig } = require('./deploy');
 
 // Constants
+const DEFAULT_PROFILE = 'default';
+
+// Constants
 const VALID_ENVIRONMENTS = ['dev', 'test', 'prod'];
 const DEFAULT_ENV = 'dev';
 
@@ -53,8 +56,17 @@ async function confirmAction(message) {
 async function emptyS3Buckets(config) {
   console.log('Checking for S3 buckets to empty...');
   
+  // Configure AWS SDK with profile if specified
+  const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+  const awsOptions = { region: config.AWS_REGION };
+
+  if (awsProfile !== 'default') {
+    process.env.AWS_SDK_LOAD_CONFIG = 1; // Ensure SDK loads config from ~/.aws/config
+    AWS.config.credentials = new AWS.SharedIniFileCredentials({ profile: awsProfile });
+  }
+
   // List all stacks using AWS SDK
-  const cloudformation = new AWS.CloudFormation({ region: config.AWS_REGION });
+  const cloudformation = new AWS.CloudFormation(awsOptions);
   const stackPrefix = config.PROJECT_PREFIX;
   
   try {
@@ -91,7 +103,8 @@ async function emptyS3Buckets(config) {
             
             try {
               // Use AWS CLI to empty bucket (handles versioned objects too)
-              execSync(`aws s3 rm s3://${bucketName} --recursive`, { 
+              const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+              execSync(`aws s3 rm s3://${bucketName} --recursive ${profileParam}`, {
                 encoding: 'utf8',
                 stdio: 'inherit'
               });
@@ -131,15 +144,21 @@ async function deleteStacks(config) {
   console.log('Deleting stacks in reverse dependency order...');
   
   try {
+    // Configure AWS profile
+    const awsProfile = config.AWS_PROFILE || DEFAULT_PROFILE;
+    const profileParam = awsProfile !== 'default' ? `--profile ${awsProfile}` : '';
+
     // Use CDK destroy to properly handle dependencies
-    execSync(`cdk destroy --all --force`, { 
+    execSync(`cdk destroy --all --force ${profileParam}`, {
       encoding: 'utf8',
       stdio: 'inherit',
       env: {
         ...process.env,
         CDK_DEFAULT_REGION: config.AWS_REGION,
         PROJECT_PREFIX: config.PROJECT_PREFIX,
-        ENV: config.ENV
+        ENV: config.ENV,
+        AWS_PROFILE: awsProfile,
+        AWS_SDK_LOAD_CONFIG: '1'
       }
     });
     console.log(`\nStack deletion completed successfully!`);
@@ -155,30 +174,47 @@ async function main() {
   // Get the target environment from command line arguments
   const args = process.argv.slice(2);
   let environment = args[0] || DEFAULT_ENV;
-  
+
   // Validate the environment
   if (!VALID_ENVIRONMENTS.includes(environment)) {
     console.error(`Invalid environment: ${environment}`);
     console.error(`Valid environments are: ${VALID_ENVIRONMENTS.join(', ')}`);
     process.exit(1);
   }
-  
+
+  // Parse --profile flag if provided
+  let customProfile = DEFAULT_PROFILE;
+  const profileFlagIndex = args.findIndex(arg => arg.startsWith('--profile='));
+  if (profileFlagIndex !== -1) {
+    customProfile = args[profileFlagIndex].split('=')[1];
+    if (!customProfile) {
+      console.error('Invalid profile format. Use --profile=<profile_name>');
+      process.exit(1);
+    }
+  }
+
   console.log(`=== GEOS-Chem AWS Cloud Runner Cleanup ===`);
   console.log(`Target Environment: ${environment.toUpperCase()}`);
-  
+
   if (environment === 'prod' && !args.includes('--force')) {
     const doubleConfirm = await confirmAction(
       `WARNING: You are about to delete PRODUCTION resources. Type 'CONFIRM-PROD-DELETION' to continue:`
     );
-    
+
     if (!doubleConfirm) {
       console.log('Production cleanup cancelled.');
       process.exit(0);
     }
   }
-  
+
   // Load environment configuration
   const config = loadEnvConfig(environment);
+
+  // Override profile if provided via command line
+  if (customProfile !== DEFAULT_PROFILE) {
+    config.AWS_PROFILE = customProfile;
+    console.log(`Using AWS profile from command line: ${customProfile}`);
+  }
   
   // Empty S3 buckets to allow stack deletion
   await emptyS3Buckets(config);
