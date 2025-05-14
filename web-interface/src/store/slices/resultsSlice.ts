@@ -45,6 +45,37 @@ export interface Visualization {
   metadata?: NetCDFMetadata;
 }
 
+interface SpatialVisualizationResult {
+  simulationId: string;
+  imageUrl: string;
+  metadata: {
+    variable: string;
+    level?: string | number;
+    time?: number;
+    plotType: string;
+    colormap: string;
+    min: number;
+    max: number;
+    units: string;
+  };
+}
+
+interface SpatialDifferenceResult {
+  simulationId1: string;
+  simulationId2: string;
+  imageUrl: string;
+  metadata: {
+    variable: string;
+    level?: string | number;
+    time?: number;
+    useRelativeDifference: boolean;
+    colormap: string;
+    min: number;
+    max: number;
+    units: string;
+  };
+}
+
 interface ResultsState {
   currentSimulationId: string | null;
   files: FileItem[];
@@ -53,6 +84,8 @@ interface ResultsState {
   selectedFile: FileItem | null;
   netcdfMetadata: Record<string, NetCDFMetadata>; // Key is filePath
   selectedVariables: string[];
+  spatialVisualizations: Record<string, SpatialVisualizationResult>; // Key is simulationId
+  spatialDifferences: Record<string, SpatialDifferenceResult>; // Key is simulationId1_simulationId2
   loading: boolean;
   error: string | null;
   generatingVisualization: boolean;
@@ -66,6 +99,8 @@ const initialState: ResultsState = {
   selectedFile: null,
   netcdfMetadata: {},
   selectedVariables: [],
+  spatialVisualizations: {},
+  spatialDifferences: {},
   loading: false,
   error: null,
   generatingVisualization: false
@@ -183,6 +218,133 @@ export const generateVisualization = createAsyncThunk(
       return response;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to generate visualization');
+    }
+  }
+);
+
+export const generateSpatialVisualization = createAsyncThunk(
+  'results/generateSpatialVisualization',
+  async (
+    {
+      simulationId,
+      filePath,
+      variable,
+      level,
+      time,
+      plotType = 'horizontal',
+      colormap = 'viridis',
+    }: {
+      simulationId: string;
+      filePath: string;
+      variable: string;
+      level?: string | number;
+      time?: number;
+      plotType?: 'horizontal' | 'zonal' | 'vertical';
+      colormap?: string;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.post(
+        'GeosChemAPI',
+        `/api/results/${simulationId}/spatial-visualization`,
+        {
+          body: {
+            filePath,
+            variable,
+            level,
+            time,
+            plotType,
+            colormap
+          }
+        }
+      );
+
+      // In a real implementation, this would return the visualization URL
+      // For now, we'll mock the response for demonstration
+      return {
+        simulationId,
+        imageUrl: `https://via.placeholder.com/800x400?text=${simulationId}_${variable}_${level}_${time}`,
+        metadata: {
+          variable,
+          level,
+          time,
+          plotType,
+          colormap,
+          min: 0,
+          max: 100,
+          units: 'ppb'
+        }
+      };
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to generate spatial visualization');
+    }
+  }
+);
+
+export const generateSpatialDifferenceVisualization = createAsyncThunk(
+  'results/generateSpatialDifferenceVisualization',
+  async (
+    {
+      simulationId1,
+      simulationId2,
+      filePath1,
+      filePath2,
+      variable,
+      level,
+      time,
+      useRelativeDifference = false,
+      colormap = 'RdBu_r',
+    }: {
+      simulationId1: string;
+      simulationId2: string;
+      filePath1: string;
+      filePath2: string;
+      variable: string;
+      level?: string | number;
+      time?: number;
+      useRelativeDifference?: boolean;
+      colormap?: string;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.post(
+        'GeosChemAPI',
+        `/api/results/spatial-difference`,
+        {
+          body: {
+            simulationId1,
+            simulationId2,
+            filePath1,
+            filePath2,
+            variable,
+            level,
+            time,
+            useRelativeDifference,
+            colormap
+          }
+        }
+      );
+
+      // Mock response for demonstration
+      return {
+        simulationId1,
+        simulationId2,
+        imageUrl: `https://via.placeholder.com/800x400?text=diff_${simulationId2}_vs_${simulationId1}_${variable}_${useRelativeDifference ? 'relative' : 'absolute'}`,
+        metadata: {
+          variable,
+          level,
+          time,
+          useRelativeDifference,
+          colormap,
+          min: -50,
+          max: 50,
+          units: useRelativeDifference ? '%' : 'ppb'
+        }
+      };
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to generate spatial difference visualization');
     }
   }
 );
@@ -373,6 +535,38 @@ const resultsSlice = createSlice({
       .addCase(fetchNetCDFData.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
+      })
+
+      // Generate Spatial Visualization
+      .addCase(generateSpatialVisualization.pending, (state) => {
+        state.generatingVisualization = true;
+        state.error = null;
+      })
+      .addCase(generateSpatialVisualization.fulfilled, (state, action) => {
+        const result = action.payload;
+        state.spatialVisualizations[result.simulationId] = result;
+        state.generatingVisualization = false;
+      })
+      .addCase(generateSpatialVisualization.rejected, (state, action) => {
+        state.generatingVisualization = false;
+        state.error = action.payload as string;
+      })
+
+      // Generate Spatial Difference Visualization
+      .addCase(generateSpatialDifferenceVisualization.pending, (state) => {
+        state.generatingVisualization = true;
+        state.error = null;
+      })
+      .addCase(generateSpatialDifferenceVisualization.fulfilled, (state, action) => {
+        const result = action.payload;
+        // Create a key using both simulation IDs
+        const key = `${result.simulationId1}_${result.simulationId2}`;
+        state.spatialDifferences[key] = result;
+        state.generatingVisualization = false;
+      })
+      .addCase(generateSpatialDifferenceVisualization.rejected, (state, action) => {
+        state.generatingVisualization = false;
+        state.error = action.payload as string;
       });
   }
 });
@@ -388,5 +582,11 @@ export const {
 // Selectors
 export const selectNetCDFMetadata = (filePath: string) => (state: { results: ResultsState }) =>
   state.results.netcdfMetadata[filePath];
+
+export const selectSpatialVisualization = (simulationId: string) => (state: { results: ResultsState }) =>
+  state.results.spatialVisualizations[simulationId];
+
+export const selectSpatialDifference = (simulationId1: string, simulationId2: string) => (state: { results: ResultsState }) =>
+  state.results.spatialDifferences[`${simulationId1}_${simulationId2}`];
 
 export default resultsSlice.reducer;

@@ -62,8 +62,14 @@ const ResultsViewer: React.FC = () => {
 
   const handleFileSelect = (filePath: string) => {
     setSelectedFile(filePath);
+
+    // Check if file is a NetCDF file
+    const isNetCDFFile = filePath.toLowerCase().endsWith('.nc') ||
+                          filePath.toLowerCase().endsWith('.nc4');
+
     // If selecting a file, automatically switch to file viewer tab
-    setActiveTab(1);
+    // If it's a NetCDF file, we might want to optimize for visualization
+    setActiveTab(isNetCDFFile ? 2 : 1);
   };
 
   if (loading) {

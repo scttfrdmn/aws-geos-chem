@@ -22,6 +22,7 @@ import {
 import { SimulationResults } from '../../types/simulation';
 import { getVisualizationData } from '../../services/simulationService';
 import SpatialVisualization from './SpatialVisualization';
+import StatisticalAnalysis from './StatisticalAnalysis';
 
 interface DataVisualizationProps {
   simulationId: string;
@@ -430,6 +431,43 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
     const dataset = availableDatasets.find(ds => ds.id === selectedDataset);
 
     // Determine which chart type to use
+    if (chartType === 5) {  // Statistical Analysis
+      // Create data structure for StatisticalAnalysis component
+      const variableNames = selectedVariables;
+      const values: Record<string, number[]> = {};
+
+      // Extract values for each selected variable
+      selectedVariables.forEach(variable => {
+        values[variable] = data.map(item =>
+          typeof item[variable] === 'number' ? item[variable] : NaN
+        );
+      });
+
+      // Extract x-axis data (usually time)
+      const xAxis = data.map(item =>
+        item.time || item.x || ''
+      );
+
+      // Extract units from metadata
+      const units: Record<string, string> = {};
+      selectedVariables.forEach(variable => {
+        units[variable] = metadata.yAxisLabel || '';
+      });
+
+      return (
+        <StatisticalAnalysis
+          data={{
+            variableNames,
+            values,
+            xAxis,
+            units,
+            description: metadata.title || undefined
+          }}
+          title={`Statistical Analysis: ${selectedVariables.join(', ')}`}
+        />
+      );
+    }
+
     if (dataset?.type === 'spatial' || chartType === 4) {
       // Spatial visualization with map
       // For this example, we'll create sample spatial data from the first variable
@@ -696,6 +734,7 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
             <Tab label="Scatter" id="chart-tab-2" aria-controls="chart-panel-2" />
             <Tab label="Bar Chart" id="chart-tab-3" aria-controls="chart-panel-3" />
             <Tab label="Spatial Map" id="chart-tab-4" aria-controls="chart-panel-4" />
+            <Tab label="Statistical Analysis" id="chart-tab-5" aria-controls="chart-panel-5" />
           </Tabs>
         </Box>
         

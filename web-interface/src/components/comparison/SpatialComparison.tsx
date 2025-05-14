@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -30,8 +30,17 @@ import {
   CompareArrows as CompareIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../../store';
+import {
+  fetchNetCDFMetadata,
+  fetchNetCDFData,
+  fetchResultFiles,
+  generateSpatialVisualization,
+  generateSpatialDifferenceVisualization,
+  selectSpatialVisualization,
+  selectSpatialDifference
+} from '../../store/slices/resultsSlice';
 import { SelectChangeEvent } from '@mui/material';
 
 interface SpatialComparisonProps {
@@ -180,6 +189,191 @@ const SpatialComparison: React.FC<SpatialComparisonProps> = ({
   };
   
   const samplePlots = generateSamplePlots();
+
+  // Function to fetch NetCDF files for each simulation
+  useEffect(() => {
+    const fetchFilesForSimulations = async () => {
+      if (simulationIds.length === 0) return;
+
+      const simFilesPromises = simulationIds.map(simId => {
+        return dispatch(fetchResultFiles({ simulationId: simId })) as any;
+      });
+
+      try {
+        await Promise.all(simFilesPromises);
+
+        // Process files - find NetCDF files
+        const filesInfo = simulationIds.map(simId => {
+          const sim = simulations.find(s => s.id === simId);
+          const simName = sim ? sim.name : simId;
+
+          // Filter to find NetCDF files only (ending with .nc or .nc4)
+          const netcdfFiles = files.filter(file =>
+            file.type === 'file' && (file.name.endsWith('.nc') || file.name.endsWith('.nc4'))
+          );
+
+          return {
+            simulationId: simId,
+            simulationName: simName,
+            files: netcdfFiles.map(file => ({
+              path: file.path,
+              name: file.name,
+              type: file.type
+            }))
+          };
+        });
+
+        setSimulationFiles(filesInfo);
+
+        // If we have files, fetch metadata for the first file of the first simulation
+        if (filesInfo.length > 0 && filesInfo[0].files.length > 0) {
+          const firstFilePath = filesInfo[0].files[0].path;
+          setSelectedFile(firstFilePath);
+
+          // Fetch metadata for this file
+          dispatch(fetchNetCDFMetadata({
+            simulationId: filesInfo[0].simulationId,
+            filePath: firstFilePath
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching simulation files:', err);
+      }
+    };
+
+    fetchFilesForSimulations();
+  }, [dispatch, simulationIds, simulations, files]);
+
+  // Process NetCDF metadata to extract available variables
+  useEffect(() => {
+    if (!selectedFile || !netcdfMetadata[selectedFile]) return;
+
+    const metadata = netcdfMetadata[selectedFile];
+
+    // Extract variables that have lat/lon dimensions (for spatial visualization)
+    const spatialVariables = metadata.variables.filter(variable => {
+      const hasLat = variable.dimensions.some(dim =>
+        dim.toLowerCase().includes('lat') || dim.toLowerCase().includes('y')
+      );
+      const hasLon = variable.dimensions.some(dim =>
+        dim.toLowerCase().includes('lon') || dim.toLowerCase().includes('x')
+      );
+
+      return hasLat && hasLon;
+    });
+
+    const processedVariables = spatialVariables.map(variable => ({
+      id: variable.name,
+      name: variable.longName || variable.name,
+      unit: variable.units || '',
+      group: variable.dimensions.includes('lev') || variable.dimensions.includes('level') ? 'profile' : 'surface'
+    }));
+
+    setAvailableVariables(processedVariables);
+
+    // Set default variable if available
+    if (processedVariables.length > 0 && (!selectedVariable || !processedVariables.find(v => v.id === selectedVariable))) {
+      setSelectedVariable(processedVariables[0].id);
+    }
+  }, [selectedFile, netcdfMetadata, selectedVariable]);
+
+  // Generate real visualizations for the selected parameters
+  const generateRealVisualizations = async () => {
+    if (!selectedVariable || simulationFiles.length === 0 || !selectedFile) return;
+
+    setGeneratingVisualizations(true);
+
+    try {
+      // Generate visualization for each simulation
+      const visualizationPromises = simulationFiles.map(async (simFile) => {
+        // Find the matching file in this simulation
+        const matchingFile = simFile.files.find(file =>
+          file.name === selectedFile.split('/').pop()
+        );
+
+        if (!matchingFile) return null;
+
+        // Generate the spatial visualization
+        const response = await dispatch(generateSpatialVisualization({
+          simulationId: simFile.simulationId,
+          filePath: matchingFile.path,
+          variable: selectedVariable,
+          level: selectedLevel,
+          time: selectedTime,
+          plotType: tabValue === 0 ? 'horizontal' : tabValue === 1 ? 'zonal' : 'vertical'
+        })) as any;
+
+        // Update the visualization URL map
+        return response.payload;
+      });
+
+      const results = await Promise.all(visualizationPromises);
+
+      // Update visualization URLs
+      const urlMap: Record<string, string> = {};
+      results.filter(Boolean).forEach((result: any) => {
+        if (result && result.simulationId) {
+          urlMap[result.simulationId] = result.imageUrl;
+        }
+      });
+
+      setVisualizationUrls(urlMap);
+
+      // Generate difference maps if there are at least 2 simulations
+      if (simulationIds.length >= 2 && showDifference) {
+        const referenceSimId = simulationIds[0];
+        const referenceFile = simulationFiles.find(sf => sf.simulationId === referenceSimId)?.files.find(file =>
+          file.name === selectedFile.split('/').pop()
+        );
+
+        if (referenceFile) {
+          const differencePromises = simulationIds.slice(1).map(async (comparisonSimId) => {
+            const comparisonFile = simulationFiles.find(sf => sf.simulationId === comparisonSimId)?.files.find(file =>
+              file.name === selectedFile.split('/').pop()
+            );
+
+            if (!comparisonFile) return null;
+
+            // Generate the difference visualization
+            const response = await dispatch(generateSpatialDifferenceVisualization({
+              simulationId1: referenceSimId,
+              simulationId2: comparisonSimId,
+              filePath1: referenceFile.path,
+              filePath2: comparisonFile.path,
+              variable: selectedVariable,
+              level: selectedLevel,
+              time: selectedTime,
+              useRelativeDifference: useRelativeDifference
+            })) as any;
+
+            return response.payload;
+          });
+
+          const diffResults = await Promise.all(differencePromises);
+
+          // Update the difference visualization URLs
+          diffResults.filter(Boolean).forEach((result: any) => {
+            if (result) {
+              urlMap[`diff_${result.simulationId1}_${result.simulationId2}`] = result.imageUrl;
+            }
+          });
+
+          setVisualizationUrls(urlMap);
+        }
+      }
+    } catch (err) {
+      console.error('Error generating visualizations:', err);
+    } finally {
+      setGeneratingVisualizations(false);
+    }
+  };
+
+  // Generate visualizations when parameters change
+  useEffect(() => {
+    if (simulationIds.length > 0 && selectedVariable && selectedFile) {
+      generateRealVisualizations();
+    }
+  }, [selectedVariable, selectedLevel, selectedTime, selectedFile, showDifference, useRelativeDifference, tabValue, dispatch, simulationIds, simulationFiles]);
   
   return (
     <Box>
@@ -437,76 +631,84 @@ const SpatialComparison: React.FC<SpatialComparisonProps> = ({
       
       <TabPanel value={tabValue} index={2}>
         <Grid container spacing={3}>
-          {/* Vertical profile plots */}
-          {samplePlots.verticalProfiles.map((plot) => (
-            <Grid item xs={12} md={6} key={plot.simulationId}>
-              <Card variant="outlined">
-                <CardMedia
-                  component="img"
-                  height="300"
-                  image={plot.imageUrl}
-                  alt={`Vertical Profile - ${plot.name}`}
-                />
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="subtitle1">
-                      Vertical Profile: {plot.name}
-                    </Typography>
-                    <Box>
-                      <Tooltip title="View Full Size">
-                        <IconButton size="small" sx={{ mr: 1 }}>
-                          <VisibilityIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Download Image">
-                        <IconButton size="small">
-                          <DownloadIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Vertical profile of {selectedVariable} by altitude
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-          
-          {/* Combined vertical profile plot */}
-          {simulationIds.length > 1 && (
-            <Grid item xs={12}>
-              <Card variant="outlined">
-                <CardMedia
-                  component="img"
-                  height="300"
-                  image={`https://via.placeholder.com/800x400?text=Combined+Vertical+Profiles+${selectedVariable}`}
-                  alt="Combined Vertical Profiles"
-                />
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="subtitle1">
-                      Combined Vertical Profiles
-                    </Typography>
-                    <Box>
-                      <Tooltip title="View Full Size">
-                        <IconButton size="small" sx={{ mr: 1 }}>
-                          <VisibilityIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Download Image">
-                        <IconButton size="small">
-                          <DownloadIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Comparison of vertical profiles across all simulations
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
+          {generatingVisualizations ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              {/* Vertical profile plots */}
+              {simulationFiles.map((simFile) => (
+                <Grid item xs={12} md={6} key={simFile.simulationId}>
+                  <Card variant="outlined">
+                    <CardMedia
+                      component="img"
+                      height="300"
+                      image={`https://via.placeholder.com/800x400?text=Vertical+Profile+${simFile.simulationName}+${selectedVariable}`}
+                      alt={`Vertical Profile - ${simFile.simulationName}`}
+                    />
+                    <CardContent>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="subtitle1">
+                          Vertical Profile: {simFile.simulationName}
+                        </Typography>
+                        <Box>
+                          <Tooltip title="View Full Size">
+                            <IconButton size="small" sx={{ mr: 1 }}>
+                              <VisibilityIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Download Image">
+                            <IconButton size="small">
+                              <DownloadIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Vertical profile of {selectedVariable} by altitude
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+
+              {/* Combined vertical profile plot */}
+              {simulationIds.length > 1 && (
+                <Grid item xs={12}>
+                  <Card variant="outlined">
+                    <CardMedia
+                      component="img"
+                      height="300"
+                      image={`https://via.placeholder.com/800x400?text=Combined+Vertical+Profiles+${selectedVariable}`}
+                      alt="Combined Vertical Profiles"
+                    />
+                    <CardContent>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="subtitle1">
+                          Combined Vertical Profiles
+                        </Typography>
+                        <Box>
+                          <Tooltip title="View Full Size">
+                            <IconButton size="small" sx={{ mr: 1 }}>
+                              <VisibilityIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Download Image">
+                            <IconButton size="small">
+                              <DownloadIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Comparison of vertical profiles across all simulations
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              )}
+            </>
           )}
         </Grid>
       </TabPanel>
