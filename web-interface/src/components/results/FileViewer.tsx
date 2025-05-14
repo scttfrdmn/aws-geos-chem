@@ -20,9 +20,13 @@ import {
   Code as CodeIcon,
   Description as TextIcon,
   Image as ImageIcon,
-  TableChart as CSVIcon
+  TableChart as CSVIcon,
+  DataObject as NetCDFIcon,
+  Storage as BpchIcon
 } from '@mui/icons-material';
 import { getFileContent, downloadFile } from '../../services/simulationService';
+import NetCDFViewer from './NetCDFViewer';
+import BpchViewer from './BpchViewer';
 
 // Syntax highlighting imports
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -33,7 +37,7 @@ interface FileViewerProps {
   simulationId: string;
 }
 
-type FileType = 'text' | 'image' | 'netcdf' | 'csv' | 'binary' | 'unknown';
+type FileType = 'text' | 'image' | 'netcdf' | 'csv' | 'binary' | 'bpch' | 'unknown';
 
 const FileViewer: React.FC<FileViewerProps> = ({ filePath, simulationId }) => {
   const [fileContent, setFileContent] = useState<string | null>(null);
@@ -44,7 +48,8 @@ const FileViewer: React.FC<FileViewerProps> = ({ filePath, simulationId }) => {
 
   const determineFileType = (path: string, content?: string): FileType => {
     const extension = path.split('.').pop()?.toLowerCase() || '';
-    
+    const fileName = path.split('/').pop()?.toLowerCase() || '';
+
     switch (extension) {
       case 'txt':
       case 'log':
@@ -70,7 +75,17 @@ const FileViewer: React.FC<FileViewerProps> = ({ filePath, simulationId }) => {
       case 'csv':
       case 'tsv':
         return 'csv';
+      case 'bpch':
+        return 'bpch';
       default:
+        // Check for BPCH files (they often don't have extensions but have specific naming patterns)
+        if (fileName.includes('trac_avg') ||
+            fileName.includes('ctm.bpch') ||
+            fileName.includes('gctm.') ||
+            fileName.endsWith('.bpch')) {
+          return 'bpch';
+        }
+
         // Try to determine if it's text by checking content
         if (content && isTextContent(content)) {
           return 'text';
@@ -187,12 +202,14 @@ const FileViewer: React.FC<FileViewerProps> = ({ filePath, simulationId }) => {
       case 'netcdf':
         return (
           <Box sx={{ p: 2 }}>
-            <Typography variant="body1" gutterBottom>
-              NetCDF files cannot be directly displayed in the browser.
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Please download the file to open it with a compatible application like Panoply or xarray.
-            </Typography>
+            <NetCDFViewer simulationId={simulationId} filePath={filePath} />
+          </Box>
+        );
+
+      case 'bpch':
+        return (
+          <Box sx={{ p: 2 }}>
+            <BpchViewer simulationId={simulationId} filePath={filePath} />
           </Box>
         );
         
@@ -278,6 +295,8 @@ const FileViewer: React.FC<FileViewerProps> = ({ filePath, simulationId }) => {
       case 'text': return <TextIcon />;
       case 'image': return <ImageIcon />;
       case 'csv': return <CSVIcon />;
+      case 'netcdf': return <NetCDFIcon />;
+      case 'bpch': return <BpchIcon />;
       default: return <CodeIcon />;
     }
   };

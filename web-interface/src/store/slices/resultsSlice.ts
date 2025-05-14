@@ -11,15 +11,38 @@ export interface FileItem {
   path: string;
 }
 
+export interface NetCDFVariable {
+  name: string;
+  longName?: string;
+  units?: string;
+  dimensions: string[];
+  shape: number[];
+  attributes?: Record<string, any>;
+}
+
+export interface NetCDFDimension {
+  name: string;
+  size: number;
+  values?: number[] | string[];
+  units?: string;
+}
+
+export interface NetCDFMetadata {
+  dimensions: NetCDFDimension[];
+  variables: NetCDFVariable[];
+  globalAttributes: Record<string, any>;
+}
+
 export interface Visualization {
   id: string;
-  type: 'map' | 'timeseries' | 'profile' | 'summary';
+  type: 'map' | 'timeseries' | 'profile' | 'summary' | 'spatial';
   title: string;
   description: string;
   imageUrl: string;
   createdAt: string;
   dataKey: string;
   simulationId: string;
+  metadata?: NetCDFMetadata;
 }
 
 interface ResultsState {
@@ -28,6 +51,8 @@ interface ResultsState {
   currentPath: string;
   visualizations: Visualization[];
   selectedFile: FileItem | null;
+  netcdfMetadata: Record<string, NetCDFMetadata>; // Key is filePath
+  selectedVariables: string[];
   loading: boolean;
   error: string | null;
   generatingVisualization: boolean;
@@ -39,6 +64,8 @@ const initialState: ResultsState = {
   currentPath: '',
   visualizations: [],
   selectedFile: null,
+  netcdfMetadata: {},
+  selectedVariables: [],
   loading: false,
   error: null,
   generatingVisualization: false
@@ -136,7 +163,7 @@ export const generateVisualization = createAsyncThunk(
     }: {
       simulationId: string;
       fileKey: string;
-      type: 'map' | 'timeseries' | 'profile' | 'summary';
+      type: 'map' | 'timeseries' | 'profile' | 'summary' | 'spatial';
       params: any;
     },
     { rejectWithValue }
@@ -160,6 +187,64 @@ export const generateVisualization = createAsyncThunk(
   }
 );
 
+export const fetchNetCDFMetadata = createAsyncThunk(
+  'results/fetchNetCDFMetadata',
+  async (
+    { simulationId, filePath }: { simulationId: string; filePath: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.get(
+        'GeosChemAPI',
+        `/api/results/${simulationId}/netcdf-metadata`,
+        {
+          queryStringParameters: {
+            filePath
+          }
+        }
+      );
+      return { filePath, metadata: response.metadata };
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to fetch NetCDF metadata');
+    }
+  }
+);
+
+export const fetchNetCDFData = createAsyncThunk(
+  'results/fetchNetCDFData',
+  async (
+    {
+      simulationId,
+      filePath,
+      variable,
+      dimensions
+    }: {
+      simulationId: string;
+      filePath: string;
+      variable: string;
+      dimensions?: Record<string, number | [number, number]>;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await API.get(
+        'GeosChemAPI',
+        `/api/results/${simulationId}/netcdf-data`,
+        {
+          queryStringParameters: {
+            filePath,
+            variable,
+            dimensions: dimensions ? JSON.stringify(dimensions) : undefined
+          }
+        }
+      );
+      return { filePath, variable, data: response.data, metadata: response.metadata };
+    } catch (error: any) {
+      return rejectWithValue(error.message || 'Failed to fetch NetCDF data');
+    }
+  }
+);
+
 // Slice
 const resultsSlice = createSlice({
   name: 'results',
@@ -173,6 +258,12 @@ const resultsSlice = createSlice({
     },
     setCurrentPath: (state, action: PayloadAction<string>) => {
       state.currentPath = action.payload;
+    },
+    setSelectedVariables: (state, action: PayloadAction<string[]>) => {
+      state.selectedVariables = action.payload;
+    },
+    clearNetCDFMetadata: (state) => {
+      state.netcdfMetadata = {};
     }
   },
   extraReducers: (builder) => {
@@ -248,9 +339,54 @@ const resultsSlice = createSlice({
       .addCase(generateVisualization.rejected, (state, action) => {
         state.generatingVisualization = false;
         state.error = action.payload as string;
+      })
+
+      // Fetch NetCDF Metadata
+      .addCase(fetchNetCDFMetadata.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchNetCDFMetadata.fulfilled, (state, action) => {
+        const { filePath, metadata } = action.payload;
+        state.netcdfMetadata[filePath] = metadata;
+        state.loading = false;
+      })
+      .addCase(fetchNetCDFMetadata.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+
+      // Fetch NetCDF Data
+      .addCase(fetchNetCDFData.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchNetCDFData.fulfilled, (state, action) => {
+        // Data is passed to the component directly, not stored in Redux
+        // But we can update metadata if it's included
+        const { filePath, metadata } = action.payload;
+        if (metadata) {
+          state.netcdfMetadata[filePath] = metadata;
+        }
+        state.loading = false;
+      })
+      .addCase(fetchNetCDFData.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       });
   }
 });
 
-export const { clearSelectedFile, clearError, setCurrentPath } = resultsSlice.actions;
+export const {
+  clearSelectedFile,
+  clearError,
+  setCurrentPath,
+  setSelectedVariables,
+  clearNetCDFMetadata
+} = resultsSlice.actions;
+
+// Selectors
+export const selectNetCDFMetadata = (filePath: string) => (state: { results: ResultsState }) =>
+  state.results.netcdfMetadata[filePath];
+
 export default resultsSlice.reducer;

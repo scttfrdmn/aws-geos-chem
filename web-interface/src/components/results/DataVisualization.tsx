@@ -15,12 +15,13 @@ import {
   Tab,
   SelectChangeEvent
 } from '@mui/material';
-import { 
+import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, ScatterChart, Scatter, ZAxis
 } from 'recharts';
 import { SimulationResults } from '../../types/simulation';
 import { getVisualizationData } from '../../services/simulationService';
+import SpatialVisualization from './SpatialVisualization';
 
 interface DataVisualizationProps {
   simulationId: string;
@@ -31,7 +32,7 @@ interface DataSet {
   id: string;
   name: string;
   description: string;
-  type: 'timeseries' | 'profile' | 'scatter' | 'bar';
+  type: 'timeseries' | 'profile' | 'scatter' | 'bar' | 'spatial';
   variables: string[];
 }
 
@@ -57,22 +58,57 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
   // Scan results for potential visualization datasets
   useEffect(() => {
     if (!results || !results.files) return;
-    
+
     // Look for NetCDF, CSV files and standard GEOS-Chem output files that might be visualizable
     const potentialDatasets: DataSet[] = [];
-    
+
     const scanDirectory = (files: any[], basePath: string = '') => {
       files.forEach(file => {
         if (file.type === 'file') {
           const ext = file.name.split('.').pop()?.toLowerCase();
           const fullPath = basePath ? `${basePath}/${file.name}` : file.name;
-          
+
           if (ext === 'nc' || ext === 'nc4') {
+            // Classify NetCDF files more granularly based on file name patterns
+            let datasetType: 'timeseries' | 'profile' | 'scatter' | 'bar' = 'timeseries';
+            let description = 'NetCDF dataset';
+
+            // Classify based on GEOS-Chem naming conventions
+            if (file.name.includes('SpeciesConc') || file.name.includes('concentration')) {
+              description = 'Species concentrations';
+            } else if (file.name.includes('StateMet') || file.name.includes('Met')) {
+              description = 'Meteorological data';
+            } else if (file.name.includes('Emissions') || file.name.includes('Emis')) {
+              description = 'Emissions data';
+            } else if (file.name.includes('Deposition') || file.name.includes('Dep')) {
+              description = 'Deposition data';
+            } else if (file.name.includes('Aerosol')) {
+              description = 'Aerosol data';
+            } else if (file.name.includes('Budget') || file.name.includes('Mass')) {
+              description = 'Budget data';
+            } else if (file.name.includes('JValues')) {
+              description = 'Photolysis rates';
+            }
+
+            // Determine the type based on naming pattern or default
+            if (file.name.includes('ts_') || file.name.includes('timeseries')) {
+              datasetType = 'timeseries';
+            } else if (file.name.includes('profile') || file.name.includes('vertical')) {
+              datasetType = 'profile';
+            } else if (file.name.includes('daily') || file.name.includes('monthly')) {
+              datasetType = 'timeseries';
+            } else if (file.name.includes('spatial') ||
+                       file.name.includes('map') ||
+                       file.name.includes('global') ||
+                       file.name.includes('grid')) {
+              datasetType = 'spatial';
+            }
+
             potentialDatasets.push({
               id: fullPath,
               name: file.name,
-              description: 'NetCDF dataset',
-              type: 'timeseries', // Default, will be refined when loaded
+              description,
+              type: datasetType,
               variables: ['Loading...'] // Placeholder until we load the actual variables
             });
           } else if (ext === 'csv') {
@@ -99,6 +135,14 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
               type: 'profile',
               variables: ['Loading...']
             });
+          } else if (file.name.includes('budget') || file.name.includes('diag')) {
+            potentialDatasets.push({
+              id: fullPath,
+              name: file.name,
+              description: 'Diagnostic data',
+              type: 'bar',
+              variables: ['Loading...']
+            });
           }
         } else if (file.type === 'directory' && file.children) {
           // Recursively scan subdirectories
@@ -107,7 +151,7 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
         }
       });
     };
-    
+
     scanDirectory(results.files);
     
     // Add some example datasets for demo purposes if none found
@@ -381,12 +425,53 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
         </Box>
       );
     }
-    
+
     const { data, metadata } = visualizationData;
     const dataset = availableDatasets.find(ds => ds.id === selectedDataset);
-    
+
     // Determine which chart type to use
-    if (dataset?.type === 'timeseries' || chartType === 0) {
+    if (dataset?.type === 'spatial' || chartType === 4) {
+      // Spatial visualization with map
+      // For this example, we'll create sample spatial data from the first variable
+
+      // Extract the variable name
+      const variable = selectedVariables[0] || 'Unknown';
+
+      // In a real implementation, this would be actual latitude, longitude, and data values
+      // Here we're generating a sample grid for demonstration
+
+      // Create a grid of longitudes and latitudes
+      const longitude = Array.from({ length: 72 }, (_, i) => -180 + i * 5);
+      const latitude = Array.from({ length: 46 }, (_, i) => -90 + i * 4);
+
+      // Generate sample data values
+      const values = latitude.map((lat) => {
+        return longitude.map((lon) => {
+          // Create a simple pattern based on latitude and longitude
+          // In a real implementation, this would be the actual data values
+          return 50 + 25 * Math.sin(lat / 10) * Math.cos(lon / 10);
+        });
+      });
+
+      // Create the spatial data object
+      const spatialData = {
+        longitude,
+        latitude,
+        values,
+        variable,
+        units: metadata.yAxisLabel || 'units',
+        level: 1,
+        time: data.length > 0 && data[0].time ? data[0].time : undefined
+      };
+
+      return (
+        <SpatialVisualization
+          data={spatialData}
+          title={metadata.title || 'Spatial Visualization'}
+          description={`Geographic distribution of ${variable}`}
+        />
+      );
+    } else if (dataset?.type === 'timeseries' || chartType === 0) {
       // Line chart for time series
       return (
         <Box sx={{ width: '100%', height: 400 }}>
@@ -401,12 +486,12 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
               <Tooltip />
               <Legend />
               {selectedVariables.map((variable, index) => (
-                <Line 
+                <Line
                   key={variable}
-                  type="monotone" 
-                  dataKey={variable} 
-                  stroke={`hsl(${index * 60}, 70%, 50%)`} 
-                  activeDot={{ r: 8 }} 
+                  type="monotone"
+                  dataKey={variable}
+                  stroke={`hsl(${index * 60}, 70%, 50%)`}
+                  activeDot={{ r: 8 }}
                 />
               ))}
             </LineChart>
@@ -424,19 +509,19 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
             <LineChart data={data} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis type="number" />
-              <YAxis 
-                dataKey="altitude" 
-                type="number" 
-                label={{ value: metadata.yAxisLabel, angle: -90, position: 'insideLeft' }} 
+              <YAxis
+                dataKey="altitude"
+                type="number"
+                label={{ value: metadata.yAxisLabel, angle: -90, position: 'insideLeft' }}
               />
               <Tooltip />
               <Legend />
               {selectedVariables.map((variable, index) => (
-                <Line 
+                <Line
                   key={variable}
-                  type="monotone" 
-                  dataKey={variable} 
-                  stroke={`hsl(${index * 60}, 70%, 50%)`} 
+                  type="monotone"
+                  dataKey={variable}
+                  stroke={`hsl(${index * 60}, 70%, 50%)`}
                 />
               ))}
             </LineChart>
@@ -448,7 +533,7 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
       const varParts = selectedVariables[0]?.split(' vs ') || [];
       const xVar = varParts[0] || 'X';
       const yVar = varParts.length > 1 ? varParts[1] : 'Y';
-      
+
       return (
         <Box sx={{ width: '100%', height: 400 }}>
           <Typography variant="h6" align="center" gutterBottom>
@@ -457,23 +542,23 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
               <CartesianGrid />
-              <XAxis 
-                type="number" 
-                dataKey={xVar} 
-                name={xVar} 
-                label={{ value: xVar, position: 'insideBottom', offset: -5 }} 
+              <XAxis
+                type="number"
+                dataKey={xVar}
+                name={xVar}
+                label={{ value: xVar, position: 'insideBottom', offset: -5 }}
               />
-              <YAxis 
-                type="number" 
-                dataKey={yVar} 
-                name={yVar} 
-                label={{ value: yVar, angle: -90, position: 'insideLeft' }} 
+              <YAxis
+                type="number"
+                dataKey={yVar}
+                name={yVar}
+                label={{ value: yVar, angle: -90, position: 'insideLeft' }}
               />
-              <ZAxis 
-                type="number" 
-                dataKey="z" 
-                range={[20, 200]} 
-                name={metadata.zAxisLabel} 
+              <ZAxis
+                type="number"
+                dataKey="z"
+                range={[20, 200]}
+                name={metadata.zAxisLabel}
               />
               <Tooltip cursor={{ strokeDasharray: '3 3' }} />
               <Legend />
@@ -492,18 +577,18 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey={dataset?.type === 'timeseries' ? 'time' : 'category'} 
-                label={{ value: metadata.xAxisLabel, position: 'insideBottom', offset: -5 }} 
+              <XAxis
+                dataKey={dataset?.type === 'timeseries' ? 'time' : 'category'}
+                label={{ value: metadata.xAxisLabel, position: 'insideBottom', offset: -5 }}
               />
               <YAxis label={{ value: metadata.yAxisLabel, angle: -90, position: 'insideLeft' }} />
               <Tooltip />
               <Legend />
               {selectedVariables.map((variable, index) => (
-                <Bar 
+                <Bar
                   key={variable}
-                  dataKey={variable} 
-                  fill={`hsl(${index * 60}, 70%, 50%)`} 
+                  dataKey={variable}
+                  fill={`hsl(${index * 60}, 70%, 50%)`}
                 />
               ))}
             </BarChart>
@@ -511,7 +596,7 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
         </Box>
       );
     }
-    
+
     // Fallback if no suitable chart type is found
     return (
       <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -599,15 +684,18 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ simulationId, res
       
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-          <Tabs 
-            value={chartType} 
-            onChange={handleChartTypeChange} 
+          <Tabs
+            value={chartType}
+            onChange={handleChartTypeChange}
             aria-label="chart type tabs"
+            variant="scrollable"
+            scrollButtons="auto"
           >
             <Tab label="Line Chart" id="chart-tab-0" aria-controls="chart-panel-0" />
             <Tab label="Profile" id="chart-tab-1" aria-controls="chart-panel-1" />
             <Tab label="Scatter" id="chart-tab-2" aria-controls="chart-panel-2" />
             <Tab label="Bar Chart" id="chart-tab-3" aria-controls="chart-panel-3" />
+            <Tab label="Spatial Map" id="chart-tab-4" aria-controls="chart-panel-4" />
           </Tabs>
         </Box>
         
