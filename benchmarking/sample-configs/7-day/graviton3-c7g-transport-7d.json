@@ -1,0 +1,21 @@
+{
+  "id": "G3-C7G-4-TRANSPORT-7D",
+  "description": "7-day Transport simulation on AWS Graviton3 c7g.4xlarge",
+  "application": "gc-classic",
+  "simulation_type": "transport",
+  "domain": {
+    "type": "global",
+    "resolution": "4x5"
+  },
+  "duration": {
+    "days": 7
+  },
+  "hardware": {
+    "instance_type": "c7g.4xlarge",
+    "processor_type": "Graviton3",
+    "architecture": "arm64",
+    "vcpus": 15,
+    "memory_gb": 30
+  },
+  "metrics_focus": "Graviton3 ARM64 7-day benchmark"
+}

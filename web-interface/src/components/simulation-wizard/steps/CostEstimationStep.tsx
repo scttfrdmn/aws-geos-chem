@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Typography,
   Box,
@@ -14,7 +14,8 @@ import {
   ListItemIcon,
   ListItemText,
   LinearProgress,
-  Chip
+  Chip,
+  Button
 } from '@mui/material';
 
 import {
@@ -22,8 +23,11 @@ import {
   AccessTime as TimeIcon,
   Storage as StorageIcon,
   Receipt as BillingIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  CompareArrows as CompareIcon
 } from '@mui/icons-material';
+
+import benchmarkService, { CostEstimationRequest, CostEstimationResponse, PerformanceComparison } from '../../../services/benchmarkService';
 
 interface CostEstimationStepProps {
   formValues: any;
@@ -31,30 +35,109 @@ interface CostEstimationStepProps {
 }
 
 const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onChange }) => {
+  // State for benchmark-based estimates
+  const [costEstimate, setCostEstimate] = useState<CostEstimationResponse | null>(null);
+  const [comparisons, setComparisons] = useState<PerformanceComparison[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showComparisons, setShowComparisons] = useState<boolean>(false);
+
   // Calculate the simulation duration in days
   const calculateDurationDays = (): number => {
     if (!formValues.startDate || !formValues.endDate) return 0;
-    
+
     const start = new Date(formValues.startDate);
     const end = new Date(formValues.endDate);
-    
+
     // Check if dates are valid
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return 0;
     }
-    
+
     // Calculate difference in days
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     return diffDays;
   };
-  
+
   // Format currency
   const formatCurrency = (amount: number): string => {
     return `$${amount.toFixed(2)}`;
   };
-  
+
+  // Load cost estimates from benchmark service when form values change
+  useEffect(() => {
+    // Only fetch if we have enough data to make a meaningful estimate
+    if (
+      formValues.simulationType &&
+      formValues.processorType &&
+      formValues.instanceSize &&
+      formValues.memory &&
+      (
+        (formValues.simulationType === 'GC_CLASSIC' && formValues.resolution) ||
+        (formValues.simulationType === 'GCHP' && formValues.cubedsphereRes)
+      )
+    ) {
+      fetchCostEstimate();
+    }
+  }, [
+    formValues.simulationType,
+    formValues.processorType,
+    formValues.instanceSize,
+    formValues.memory,
+    formValues.resolution,
+    formValues.cubedsphereRes,
+    formValues.chemistryOption,
+    formValues.startDate,
+    formValues.endDate,
+    formValues.spinupDays,
+    formValues.outputFrequency,
+    formValues.useSpot
+  ]);
+
+  // Fetch cost estimate from benchmark service
+  const fetchCostEstimate = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const request: CostEstimationRequest = {
+        simulationType: formValues.simulationType,
+        processorType: formValues.processorType || 'graviton3',
+        instanceSize: formValues.instanceSize || 'medium',
+        memory: formValues.memory || 'standard',
+        resolution: formValues.resolution || '4x5',
+        cubedsphereRes: formValues.cubedsphereRes,
+        chemistryOption: formValues.chemistryOption || 'fullchem',
+        simulationDays: calculateDurationDays(),
+        spinupDays: formValues.spinupDays || 0,
+        outputFrequency: formValues.outputFrequency || 'daily',
+        useSpot: formValues.useSpot || false,
+        nodes: formValues.nodes
+      };
+
+      // Get cost estimate
+      const estimate = await benchmarkService.getEstimatedCost(request);
+      setCostEstimate(estimate);
+
+      // Update form values with the API results
+      onChange('estimatedCost', estimate.estimatedCost);
+      onChange('estimatedRuntime', estimate.estimatedRuntime);
+
+      // Also fetch performance comparisons
+      const perfComparisons = await benchmarkService.getPerformanceComparison(request);
+      setComparisons(perfComparisons);
+
+    } catch (err) {
+      console.error('Error fetching cost estimate:', err);
+      setError('Failed to fetch cost estimate from benchmarks. Using local estimates instead.');
+      // Fall back to local estimates if API fails
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Get estimated hourly cost based on instance type
   const getInstanceHourlyCost = (): number => {
     const baseCosts: Record<string, Record<string, Record<string, number>>> = {
@@ -115,33 +198,39 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
         }
       }
     };
-    
+
     // Determine cost
     try {
       const processorType = formValues.processorType || 'graviton3';
       const memoryType = formValues.memory || 'standard';
       const instanceSize = formValues.instanceSize || 'medium';
-      
+
       return baseCosts[processorType][memoryType][instanceSize];
     } catch (error) {
       console.error('Error calculating instance cost:', error);
       return 1.36; // Default to medium graviton3 standard
     }
   };
-  
+
   // Check if cost estimation is in progress
-  const isEstimating = !formValues.estimatedCost && !formValues.estimatedRuntime;
-  
+  const isEstimating = loading;
+
   // Get the estimated wall-clock runtime based on configuration
   const getEstimatedWallClockHours = (): number => {
+    // If we have benchmark data, use it
+    if (costEstimate?.estimatedRuntime) {
+      return costEstimate.estimatedRuntime;
+    }
+
+    // Otherwise, fall back to the form values if they exist
     if (formValues.estimatedRuntime) {
       return formValues.estimatedRuntime;
     }
-    
+
     // These are placeholders for the estimation logic
     // In reality, these would come from benchmarks or a prediction model
     let baseHoursPerSimDay = 0.1; // 6 minutes per simulation day
-    
+
     // Adjust for resolution/domain
     if (formValues.simulationType === 'GC_CLASSIC') {
       if (formValues.resolution === '4x5') {
@@ -166,7 +255,7 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
         baseHoursPerSimDay = 8.0; // 480 minutes per sim day
       }
     }
-    
+
     // Adjust for chemistry complexity
     if (formValues.chemistryOption === 'fullchem') {
       baseHoursPerSimDay *= 1.0; // Full factor
@@ -177,7 +266,7 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
     } else if (formValues.chemistryOption === 'transport') {
       baseHoursPerSimDay *= 0.3; // 70% faster
     }
-    
+
     // Adjust for instance size
     let instanceSpeedupFactor = 1.0;
     if (formValues.instanceSize === 'small') {
@@ -189,38 +278,49 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
     } else if (formValues.instanceSize === 'xlarge') {
       instanceSpeedupFactor = 3.2; // Not quite 4x faster due to diminishing returns
     }
-    
+
     // Calculate total runtime
     const simDays = calculateDurationDays() + (formValues.spinupDays || 0);
     const wallClockHours = (baseHoursPerSimDay * simDays) / instanceSpeedupFactor;
-    
+
     return Math.ceil(wallClockHours);
   };
-  
+
   // Compute the total estimated cost
   const computeTotalCost = (): number => {
+    // If we have benchmark data, use it
+    if (costEstimate?.estimatedCost) {
+      return costEstimate.estimatedCost;
+    }
+
+    // Otherwise, fall back to the form values if they exist
     if (formValues.estimatedCost) {
       return formValues.estimatedCost;
     }
-    
+
     const hourlyRate = getInstanceHourlyCost();
     const spotDiscount = formValues.useSpot ? 0.3 : 1.0; // 70% discount for spot
     const wallClockHours = getEstimatedWallClockHours();
-    
+
     // Calculate basic compute cost
     const computeCost = hourlyRate * spotDiscount * wallClockHours;
-    
+
     // Add storage costs (estimated)
     const storageCost = estimateStorageCost();
-    
+
     return computeCost + storageCost;
   };
-  
+
   // Estimate storage cost
   const estimateStorageCost = (): number => {
+    // If we have benchmark data, use it
+    if (costEstimate?.storageCost) {
+      return costEstimate.storageCost;
+    }
+
     // These are simplified estimates
     const baseSizeGB = formValues.simulationType === 'GC_CLASSIC' ? 10 : 20;
-    
+
     // Adjust for resolution
     let resolutionFactor = 1.0;
     if (formValues.simulationType === 'GC_CLASSIC') {
@@ -246,7 +346,7 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
         resolutionFactor = 96.0;
       }
     }
-    
+
     // Adjust for output frequency
     let frequencyFactor = 1.0;
     if (formValues.outputFrequency === 'hourly') {
@@ -258,33 +358,52 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
     } else if (formValues.outputFrequency === 'monthly') {
       frequencyFactor = 0.033;
     }
-    
+
     // Calculate storage size
     const simDays = calculateDurationDays();
     const storageGB = baseSizeGB * resolutionFactor * frequencyFactor * (simDays / 30);
-    
+
     // Cost at $0.023 per GB-month for 3 months retention
     return storageGB * 0.023 * 3;
   };
-  
+
   // Compute cost breakdown
   const computeCostBreakdown = () => {
+    // If we have benchmark data, use it
+    if (costEstimate) {
+      return {
+        compute: costEstimate.computeCost,
+        storage: costEstimate.storageCost,
+        total: costEstimate.estimatedCost,
+        wallClockHours: costEstimate.estimatedRuntime,
+        throughputDaysPerDay: costEstimate.throughputDaysPerDay,
+        storageGB: costEstimate.storageGB,
+        recommendedInstanceType: costEstimate.recommendedInstanceType,
+        costSavingTips: costEstimate.costSavingTips || []
+      };
+    }
+
+    // Otherwise use local estimation
     const hourlyRate = getInstanceHourlyCost();
     const spotDiscount = formValues.useSpot ? 0.3 : 1.0;
     const wallClockHours = getEstimatedWallClockHours();
-    
+
     const computeCost = hourlyRate * spotDiscount * wallClockHours;
     const storageCost = estimateStorageCost();
     const totalCost = computeCost + storageCost;
-    
+
     return {
       compute: computeCost,
       storage: storageCost,
       total: totalCost,
-      wallClockHours
+      wallClockHours,
+      throughputDaysPerDay: 0,
+      storageGB: 0,
+      recommendedInstanceType: null,
+      costSavingTips: []
     };
   };
-  
+
   const costBreakdown = computeCostBreakdown();
 
   return (
@@ -479,29 +598,141 @@ const CostEstimationStep: React.FC<CostEstimationStepProps> = ({ formValues, onC
                     Cost Optimization Tips
                   </Typography>
                   <List dense>
-                    <ListItem>
-                      <ListItemText 
-                        primary="Use spot instances for 70% savings (already applied if selected)"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="Reduce output frequency to save on storage and I/O costs"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="Consider using a coarser resolution for preliminary or sensitivity runs"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="Break long simulations into smaller segments to manage costs"
-                      />
-                    </ListItem>
+                    {costBreakdown.costSavingTips && costBreakdown.costSavingTips.length > 0 ? (
+                      costBreakdown.costSavingTips.map((tip, index) => (
+                        <ListItem key={index}>
+                          <ListItemText primary={tip} />
+                        </ListItem>
+                      ))
+                    ) : (
+                      <>
+                        <ListItem>
+                          <ListItemText
+                            primary="Use spot instances for 70% savings (already applied if selected)"
+                          />
+                        </ListItem>
+                        <ListItem>
+                          <ListItemText
+                            primary="Reduce output frequency to save on storage and I/O costs"
+                          />
+                        </ListItem>
+                        <ListItem>
+                          <ListItemText
+                            primary="Consider using a coarser resolution for preliminary or sensitivity runs"
+                          />
+                        </ListItem>
+                        <ListItem>
+                          <ListItemText
+                            primary="Break long simulations into smaller segments to manage costs"
+                          />
+                        </ListItem>
+                      </>
+                    )}
                   </List>
                 </Alert>
               </Box>
+
+              {/* Instance Type Recommendation */}
+              {costBreakdown.recommendedInstanceType && (
+                <Box sx={{ mt: 3 }}>
+                  <Alert severity="success">
+                    <Typography variant="subtitle2">
+                      Recommended Instance
+                    </Typography>
+                    <Typography variant="body2">
+                      Based on our benchmarks, {costBreakdown.recommendedInstanceType} offers the best cost-performance ratio for your configuration.
+                    </Typography>
+                  </Alert>
+                </Box>
+              )}
+
+              {/* Benchmark Source */}
+              {costEstimate?.benchmarkReference && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Cost estimates based on benchmark {costEstimate.benchmarkReference.benchmarkId}
+                    with {costEstimate.benchmarkReference.processorType} {costEstimate.benchmarkReference.instanceType}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Performance Comparison Button */}
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<CompareIcon />}
+                  onClick={() => setShowComparisons(!showComparisons)}
+                >
+                  {showComparisons ? 'Hide Performance Comparison' : 'Show Performance Comparison'}
+                </Button>
+              </Box>
+
+              {/* Performance Comparison Section */}
+              {showComparisons && comparisons.length > 0 && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Performance Comparison Across Instance Types
+                  </Typography>
+
+                  <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                    <Grid container spacing={2}>
+                      {comparisons.map((comparison, index) => (
+                        <Grid item xs={12} sm={6} md={4} key={index}>
+                          <Card
+                            variant="outlined"
+                            sx={{
+                              height: '100%',
+                              bgcolor: comparison.isRecommended ? 'rgba(76, 175, 80, 0.1)' : 'transparent',
+                              border: comparison.isRecommended ? '1px solid #4caf50' : '1px solid rgba(0, 0, 0, 0.12)'
+                            }}
+                          >
+                            <CardContent>
+                              <Typography variant="subtitle2" component="div" gutterBottom>
+                                {comparison.processorType} ({comparison.instanceType})
+                                {comparison.isRecommended && (
+                                  <Chip
+                                    label="Recommended"
+                                    size="small"
+                                    color="success"
+                                    sx={{ ml: 1 }}
+                                  />
+                                )}
+                              </Typography>
+
+                              <Box sx={{ mt: 2 }}>
+                                <Typography variant="body2" component="div">
+                                  <strong>Throughput:</strong> {comparison.throughputDaysPerDay.toFixed(1)} sim days/day
+                                </Typography>
+                                <Typography variant="body2" component="div">
+                                  <strong>Cost per Sim Day:</strong> {formatCurrency(comparison.costPerSimDay)}
+                                </Typography>
+                                <Typography variant="body2" component="div">
+                                  <strong>Relative Performance:</strong> {(comparison.relativePerformance * 100).toFixed(0)}%
+                                </Typography>
+                                <Typography variant="body2" component="div">
+                                  <strong>Relative Cost:</strong> {(comparison.relativeCost * 100).toFixed(0)}%
+                                </Typography>
+                                <Typography variant="body2" component="div">
+                                  <strong>Price/Performance:</strong> {comparison.pricePerformanceRatio.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  </Paper>
+                </Box>
+              )}
+
+              {/* Error Alert */}
+              {error && (
+                <Box sx={{ mt: 3 }}>
+                  <Alert severity="warning">
+                    {error}
+                  </Alert>
+                </Box>
+              )}
             </Paper>
           </Grid>
         </Grid>

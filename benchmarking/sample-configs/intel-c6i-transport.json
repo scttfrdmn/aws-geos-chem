@@ -1,0 +1,21 @@
+{
+  "id": "IN-C6I-4-TRANSPORT",
+  "description": "Transport simulation on Intel c6i.4xlarge",
+  "application": "gc-classic",
+  "simulation_type": "transport",
+  "domain": {
+    "type": "global",
+    "resolution": "4x5"
+  },
+  "duration": {
+    "days": 1
+  },
+  "hardware": {
+    "instance_type": "c6i.4xlarge",
+    "processor_type": "Intel",
+    "architecture": "amd64",
+    "vcpus": 15,
+    "memory_gb": 30
+  },
+  "metrics_focus": "Intel x86 baseline"
+}

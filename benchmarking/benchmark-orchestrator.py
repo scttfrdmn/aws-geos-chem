@@ -246,8 +246,12 @@ def submit_batch_job(job_params, args):
     if args.dry_run:
         logger.info(f"DRY RUN: Would submit Batch job with parameters: {json.dumps(job_params, indent=2)}")
         return "dry-run-job-id"
-    
-    batch_client = boto3.client('batch')
+
+    # Use the AWS_REGION environment variable or default to us-west-2
+    region = os.environ.get('AWS_REGION', 'us-west-2')
+    logger.info(f"Using AWS region: {region}")
+
+    batch_client = boto3.client('batch', region_name=region)
     try:
         response = batch_client.submit_job(**job_params)
         job_id = response['jobId']
@@ -284,46 +288,75 @@ def submit_parallel_cluster_job(job_params, args):
         logger.error(f"Error submitting ParallelCluster job: {e}")
         return None
 
-def wait_for_batch_jobs(job_ids, args, max_wait_minutes=120):
+def wait_for_batch_jobs(jobs, args, max_wait_minutes=120):
     """Wait for AWS Batch jobs to complete"""
-    if args.dry_run or not job_ids:
+    if args.dry_run or not jobs:
         return
-    
-    batch_client = boto3.client('batch')
-    
-    pending_jobs = job_ids.copy()
+
+    # Use the AWS_REGION environment variable or default to us-west-2
+    region = os.environ.get('AWS_REGION', 'us-west-2')
+    logger.info(f"Using AWS region: {region}")
+
+    batch_client = boto3.client('batch', region_name=region)
+
+    pending_jobs = jobs.copy()
     start_time = time.time()
     timeout = max_wait_minutes * 60
-    
+
     logger.info(f"Waiting for {len(pending_jobs)} jobs to complete...")
-    
+
     while pending_jobs and (time.time() - start_time) < timeout:
-        # Check job status in batches of 100
-        batch_size = 100
-        for i in range(0, len(pending_jobs), batch_size):
-            batch = pending_jobs[i:i+batch_size]
-            response = batch_client.describe_jobs(jobs=batch)
-            
-            for job in response['jobs']:
-                job_id = job['jobId']
-                status = job['status']
-                
-                if status in ['SUCCEEDED', 'FAILED']:
-                    logger.info(f"Job {job_id} {status}")
-                    pending_jobs.remove(job_id)
-                
-                elif status == 'FAILED':
-                    reason = job.get('statusReason', 'Unknown reason')
-                    logger.error(f"Job {job_id} failed: {reason}")
-                    pending_jobs.remove(job_id)
-        
+        # Process batch jobs through AWS Batch API
+        batch_job_ids = [job["job_id"] for job in pending_jobs if job["type"] == "batch"]
+
+        if batch_job_ids:
+            # Check job status in batches of 100
+            batch_size = 100
+            for i in range(0, len(batch_job_ids), batch_size):
+                batch_ids = batch_job_ids[i:i+batch_size]
+                try:
+                    response = batch_client.describe_jobs(jobs=batch_ids)
+
+                    for job_details in response['jobs']:
+                        job_id = job_details['jobId']
+                        status = job_details['status']
+
+                        # Find the corresponding job in our pending_jobs list
+                        for job in list(pending_jobs):
+                            if job["job_id"] == job_id:
+                                if status in ['SUCCEEDED', 'FAILED']:
+                                    benchmark_id = job["benchmark_id"]
+                                    logger.info(f"Job {job_id} for benchmark {benchmark_id} {status}")
+
+                                    if status == 'FAILED':
+                                        reason = job_details.get('statusReason', 'Unknown reason')
+                                        logger.error(f"Job {job_id} failed: {reason}")
+
+                                    pending_jobs.remove(job)
+                                break
+                except Exception as e:
+                    logger.error(f"Error checking batch job status: {e}")
+
+        # Process ParallelCluster jobs - we can't easily query their status
+        # Just log that we're waiting for them, but keep them in the pending list
+        parallel_cluster_jobs = [job for job in pending_jobs if job["type"] == "parallel_cluster"]
+        if parallel_cluster_jobs:
+            logger.info(f"Waiting for {len(parallel_cluster_jobs)} ParallelCluster jobs (status not available)")
+
+            # If all remaining jobs are ParallelCluster jobs and we have a long timeout,
+            # we might want to check their status through SSH
+            # This would require implementing a function like check_parallel_cluster_job_status
+
         # Wait before checking again
         if pending_jobs:
             logger.info(f"Waiting for {len(pending_jobs)} jobs to complete...")
             time.sleep(60)
-    
+
     if pending_jobs:
         logger.warning(f"Timed out waiting for {len(pending_jobs)} jobs")
+        # List the job IDs and types that timed out
+        for job in pending_jobs:
+            logger.warning(f"Job {job['job_id']} ({job['type']}) for benchmark {job['benchmark_id']} timed out")
     else:
         logger.info("All jobs completed")
 
@@ -337,7 +370,7 @@ def run_benchmarks(config, args):
             phases = [(args.phase, config[phase_key])]
         else:
             logger.error(f"Phase {args.phase} not found in configuration")
-            return
+            return []
     else:
         # Run all phases
         for i in range(1, 5):
@@ -365,60 +398,160 @@ def run_benchmarks(config, args):
                 if not args.parallel_cluster:
                     logger.warning(f"Skipping GCHP benchmark {benchmark_id} - no ParallelCluster specified")
                     continue
-                
+
                 # Generate and submit ParallelCluster job
                 job_params = generate_parallel_cluster_job_params(benchmark, args)
                 if job_params:
                     job_id = submit_parallel_cluster_job(job_params, args)
                     if job_id:
-                        submitted_jobs.append(job_id)
+                        job_info = {
+                            "job_id": job_id,
+                            "benchmark_id": benchmark_id,
+                            "type": "parallel_cluster",
+                            "phase": phase_num,
+                            "submission_time": datetime.datetime.now().isoformat(),
+                            "benchmark": benchmark  # Include the full benchmark config
+                        }
+                        submitted_jobs.append(job_info)
             else:
                 # Check if job queue and definition are specified
                 if not args.job_queue or not args.job_definition:
                     logger.warning(f"Skipping GC Classic benchmark {benchmark_id} - no job queue or definition specified")
                     continue
-                
+
                 # Generate and submit AWS Batch job
                 job_params = generate_batch_job_params(benchmark, args)
                 job_id = submit_batch_job(job_params, args)
                 if job_id:
-                    submitted_jobs.append(job_id)
+                    job_info = {
+                        "job_id": job_id,
+                        "benchmark_id": benchmark_id,
+                        "type": "batch",
+                        "phase": phase_num,
+                        "submission_time": datetime.datetime.now().isoformat(),
+                        "benchmark": benchmark  # Include the full benchmark config
+                    }
+                    submitted_jobs.append(job_info)
             
             # Limit concurrent jobs
             if len(submitted_jobs) >= args.max_concurrent:
                 logger.info(f"Reached maximum concurrent jobs ({args.max_concurrent}), waiting for some to complete...")
-                wait_for_batch_jobs(submitted_jobs[:5], args)  # Wait for the first 5 to complete
-                submitted_jobs = submitted_jobs[5:]
+                # Wait for a subset of jobs to complete
+                subset_to_wait = submitted_jobs[:min(5, len(submitted_jobs))]
+                wait_for_batch_jobs(subset_to_wait, args)  # Wait for the first few to complete
+                # Remove completed jobs from our tracking list
+                for job in subset_to_wait:
+                    if job in submitted_jobs:
+                        submitted_jobs.remove(job)
     
     # Wait for all remaining jobs
     if submitted_jobs and not args.dry_run:
         logger.info(f"Waiting for {len(submitted_jobs)} remaining jobs to complete...")
         wait_for_batch_jobs(submitted_jobs, args)
 
+    return submitted_jobs
+
+def save_benchmark_metadata(submitted_jobs, args):
+    """Save metadata about submitted benchmark jobs"""
+    if not submitted_jobs:
+        return
+
+    # Generate a unique run ID based on timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    metadata_file = f"benchmark-jobs-{timestamp}.json"
+
+    # Prepare metadata including job information and submission details
+    metadata = {
+        "benchmark_run_id": timestamp,
+        "submission_time": datetime.datetime.now().isoformat(),
+        "submitted_by": os.getenv("USER", "unknown"),
+        "dry_run": args.dry_run,
+        "jobs": submitted_jobs,
+        # Include configuration options used
+        "configuration": {
+            "config_file": args.config,
+            "output_bucket": args.output_bucket,
+            "job_queue": args.job_queue if hasattr(args, "job_queue") else None,
+            "job_definition": args.job_definition if hasattr(args, "job_definition") else None,
+            "parallel_cluster": args.parallel_cluster if hasattr(args, "parallel_cluster") else None,
+            "phase": args.phase if hasattr(args, "phase") else None,
+        }
+    }
+
+    # Save metadata to file
+    try:
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        logger.info(f"Saved benchmark job metadata to {metadata_file}")
+
+        # If we have an output bucket, also save there
+        if args.output_bucket and not args.dry_run:
+            try:
+                # Use the AWS_REGION environment variable or default to us-west-2
+                region = os.environ.get('AWS_REGION', 'us-west-2')
+                logger.info(f"Using AWS region for S3: {region}")
+
+                s3_client = boto3.client('s3', region_name=region)
+                s3_key = f"benchmark-metadata/{metadata_file}"
+                s3_client.put_object(
+                    Bucket=args.output_bucket,
+                    Key=s3_key,
+                    Body=json.dumps(metadata, indent=2)
+                )
+                logger.info(f"Uploaded benchmark job metadata to s3://{args.output_bucket}/{s3_key}")
+            except Exception as e:
+                logger.error(f"Error uploading metadata to S3: {e}")
+
+        return metadata_file
+    except Exception as e:
+        logger.error(f"Error saving benchmark job metadata: {e}")
+        return None
+
 def main():
     """Main function"""
     args = parse_args()
-    
-    # Load and validate configuration
-    config = load_config(args.config)
-    if not validate_config(config):
-        logger.error("Configuration validation failed. Exiting.")
+
+    try:
+        # Load and validate configuration
+        config = load_config(args.config)
+        if not validate_config(config):
+            logger.error("Configuration validation failed. Exiting.")
+            sys.exit(1)
+
+        # Log configuration overview
+        logger.info("Benchmarking Configuration Summary:")
+        for i in range(1, 5):
+            phase_key = f"phase_{i}"
+            if phase_key in config:
+                logger.info(f"Phase {i}: {len(config[phase_key])} benchmarks")
+
+        if args.dry_run:
+            logger.info("Running in DRY RUN mode - no jobs will be submitted")
+
+        # Verify required parameters
+        if not args.output_bucket:
+            logger.error("Output bucket is required")
+            sys.exit(1)
+
+        # Run benchmarks and track submitted jobs
+        all_submitted_jobs = []
+
+        # Run the benchmarks and collect job info
+        all_submitted_jobs = run_benchmarks(config, args)
+
+        # Save metadata about the benchmark run
+        save_benchmark_metadata(all_submitted_jobs, args)
+
+        logger.info("Benchmarking orchestration completed successfully")
+
+    except KeyboardInterrupt:
+        logger.warning("Benchmark orchestration interrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"Benchmark orchestration failed with error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         sys.exit(1)
-    
-    # Log configuration overview
-    logger.info("Benchmarking Configuration Summary:")
-    for i in range(1, 5):
-        phase_key = f"phase_{i}"
-        if phase_key in config:
-            logger.info(f"Phase {i}: {len(config[phase_key])} benchmarks")
-    
-    if args.dry_run:
-        logger.info("Running in DRY RUN mode - no jobs will be submitted")
-    
-    # Run benchmarks
-    run_benchmarks(config, args)
-    
-    logger.info("Benchmarking orchestration completed")
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,21 @@
+{
+  "id": "AMD-C7A-4-TRANSPORT-7D",
+  "description": "7-day Transport simulation on AMD EPYC Genoa c7a.4xlarge",
+  "application": "gc-classic",
+  "simulation_type": "transport",
+  "domain": {
+    "type": "global",
+    "resolution": "4x5"
+  },
+  "duration": {
+    "days": 7
+  },
+  "hardware": {
+    "instance_type": "c7a.4xlarge",
+    "processor_type": "AMD EPYC Genoa",
+    "architecture": "amd64",
+    "vcpus": 15,
+    "memory_gb": 30
+  },
+  "metrics_focus": "AMD x86 7-day benchmark"
+}

@@ -1,0 +1,72 @@
+{
+  "benchmark_run_id": "20250515-125400",
+  "submission_time": "2025-05-15T12:54:00.354990",
+  "submitted_by": "scttfrdmn",
+  "dry_run": true,
+  "jobs": [
+    {
+      "job_id": "dry-run-job-id",
+      "benchmark_id": "TEST-G3-C7G-4-TRANSPORT",
+      "type": "batch",
+      "phase": 1,
+      "submission_time": "2025-05-15T12:54:00.354868",
+      "benchmark": {
+        "id": "TEST-G3-C7G-4-TRANSPORT",
+        "description": "Transport simulation on Graviton3 c7g.4xlarge",
+        "application": "gc-classic",
+        "simulation_type": "transport",
+        "domain": {
+          "type": "global",
+          "resolution": "4x5"
+        },
+        "duration": {
+          "days": 1
+        },
+        "hardware": {
+          "instance_type": "c7g.4xlarge",
+          "processor_type": "Graviton3",
+          "architecture": "arm64",
+          "vcpus": 16,
+          "memory_gb": 32
+        },
+        "metrics_focus": "Graviton3 baseline"
+      }
+    },
+    {
+      "job_id": "dry-run-job-id",
+      "benchmark_id": "TEST-IN-C6I-4-TRANSPORT",
+      "type": "batch",
+      "phase": 1,
+      "submission_time": "2025-05-15T12:54:00.354937",
+      "benchmark": {
+        "id": "TEST-IN-C6I-4-TRANSPORT",
+        "description": "Transport simulation on Intel c6i.4xlarge",
+        "application": "gc-classic",
+        "simulation_type": "transport",
+        "domain": {
+          "type": "global",
+          "resolution": "4x5"
+        },
+        "duration": {
+          "days": 1
+        },
+        "hardware": {
+          "instance_type": "c6i.4xlarge",
+          "processor_type": "Intel",
+          "architecture": "x86_64",
+          "vcpus": 16,
+          "memory_gb": 32
+        },
+        "metrics_focus": "Intel baseline"
+      }
+    }
+  ],
+  "configuration": {
+    "config_file": "mini-benchmark-config.yaml",
+    "output_bucket": "benchmarkingstack-geoschembenchmarkresultsca52c809-yfi9i55q3xr5",
+    "job_queue": "geos-chem-graviton-queue",
+    "job_definition": "geos-chem-benchmark",
+    "parallel_cluster": null,
+    "phase": null
+  }
+}

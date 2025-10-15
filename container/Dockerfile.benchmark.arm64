@@ -1,0 +1,38 @@
+# Base Image: Amazon Linux 2023 for ARM64
+FROM amazonlinux:2023
+
+LABEL maintainer="GEOS-Chem Cloud Team <info@example.com>"
+LABEL description="GEOS-Chem benchmarking container for AWS Graviton (ARM64)"
+LABEL version="1.0.0"
+
+# Install system dependencies
+RUN dnf update -y && \
+    dnf install -y \
+    jq \
+    bc \
+    python3 \
+    python3-pip \
+    tar \
+    gzip \
+    curl \
+    procps \
+    --allowerasing && \
+    dnf clean all
+
+# Install Python packages including AWS CLI
+RUN pip3 install --no-cache-dir \
+    boto3 \
+    numpy \
+    pandas \
+    python-dateutil \
+    awscli \
+    pytest
+
+# Add benchmarking entrypoint script
+COPY benchmarking_entrypoint.sh /usr/local/bin/benchmarking_entrypoint.sh
+
+# Make script executable
+RUN chmod +x /usr/local/bin/benchmarking_entrypoint.sh
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/benchmarking_entrypoint.sh"]
