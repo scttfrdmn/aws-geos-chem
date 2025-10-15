@@ -9,9 +9,22 @@ const RESULTS_PATH = '/results';
 /**
  * Fetch a list of all simulations
  */
-export const getSimulations = async (): Promise<Simulation[]> => {
+export const getSimulations = async (
+  status?: string,
+  limit?: number,
+  nextToken?: string
+): Promise<{ simulations: Simulation[]; count: number; nextToken?: string }> => {
   try {
-    return await API.get(API_NAME, SIMULATIONS_PATH, {});
+    const queryParams: Record<string, string | number> = {};
+    if (status) queryParams.status = status;
+    if (limit) queryParams.limit = limit;
+    if (nextToken) queryParams.nextToken = nextToken;
+
+    const response = await API.get(API_NAME, SIMULATIONS_PATH, {
+      queryStringParameters: queryParams
+    });
+
+    return response;
   } catch (error) {
     console.error('Error fetching simulations:', error);
     throw error;
@@ -83,13 +96,13 @@ export const startSimulation = async (id: string): Promise<void> => {
 };
 
 /**
- * Stop a simulation
+ * Cancel a simulation
  */
-export const stopSimulation = async (id: string): Promise<void> => {
+export const cancelSimulation = async (id: string): Promise<void> => {
   try {
-    await API.post(API_NAME, `${SIMULATIONS_PATH}/${id}/stop`, {});
+    await API.post(API_NAME, `${SIMULATIONS_PATH}/${id}/cancel`, {});
   } catch (error) {
-    console.error(`Error stopping simulation ${id}:`, error);
+    console.error(`Error cancelling simulation ${id}:`, error);
     throw error;
   }
 };
