@@ -1,38 +1,38 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { API } from 'aws-amplify';
+import * as simulationService from '../../services/simulationService';
 
 // Types
 export interface Simulation {
   simulationId: string;
-  name: string;
-  status: 'CREATED' | 'SUBMITTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+  name?: string;
+  status: 'SUBMITTED' | 'PENDING' | 'RUNNABLE' | 'STARTING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   userId: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
-  config: {
-    simulationType: 'GC_CLASSIC' | 'GCHP';
-    chemistryOption: string;
-    domain: string;
-    resolution: string;
-    timeConfig: {
-      startDate: string;
-      endDate: string;
-      outputFrequency: string;
-    };
-    computeConfig: {
-      instanceType: string;
-      useSpot: boolean;
-    };
-  };
+  cancelledAt?: string;
+  simulationType: 'GC_CLASSIC' | 'GCHP';
+  startDate: string;
+  endDate: string;
+  resolution: string;
+  chemistry?: string;
+  processorType?: 'graviton4' | 'graviton3' | 'amd' | 'intel';
+  instanceSize?: 'small' | 'medium' | 'large' | 'xlarge';
+  useSpot?: boolean;
   estimatedCost?: number;
   estimatedRuntime?: number;
-  currentCost?: number;
+  actualCost?: number;
+  actualRuntime?: number;
+  throughput?: number;
   progress?: number;
-  error?: string;
+  statusDetails?: string;
   batchJobId?: string;
-  s3ResultsPath?: string;
+  executionArn?: string;
+  inputPath?: string;
+  outputPath?: string;
+  resultPath?: string;
+  manifestPath?: string;
 }
 
 interface SimulationsState {
@@ -41,6 +41,8 @@ interface SimulationsState {
   loading: boolean;
   error: string | null;
   submitting: boolean;
+  nextToken?: string;
+  count: number;
 }
 
 const initialState: SimulationsState = {
@@ -48,15 +50,21 @@ const initialState: SimulationsState = {
   currentSimulation: null,
   loading: false,
   error: null,
-  submitting: false
+  submitting: false,
+  nextToken: undefined,
+  count: 0
 };
 
 // Async thunks
 export const fetchSimulations = createAsyncThunk(
   'simulations/fetchSimulations',
-  async (_, { rejectWithValue }) => {
+  async (params: { status?: string; limit?: number; nextToken?: string } = {}, { rejectWithValue }) => {
     try {
-      const response = await API.get('GeosChemAPI', '/api/simulations', {});
+      const response = await simulationService.getSimulations(
+        params.status,
+        params.limit,
+        params.nextToken
+      );
       return response;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to fetch simulations');
@@ -68,7 +76,7 @@ export const fetchSimulationById = createAsyncThunk(
   'simulations/fetchSimulationById',
   async (id: string, { rejectWithValue }) => {
     try {
-      const response = await API.get('GeosChemAPI', `/api/simulations/${id}`, {});
+      const response = await simulationService.getSimulation(id);
       return response;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to fetch simulation');
@@ -80,24 +88,10 @@ export const createSimulation = createAsyncThunk(
   'simulations/createSimulation',
   async (simulationData: Partial<Simulation>, { rejectWithValue }) => {
     try {
-      const response = await API.post('GeosChemAPI', '/api/simulations', {
-        body: simulationData
-      });
+      const response = await simulationService.createSimulation(simulationData as any);
       return response;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to create simulation');
-    }
-  }
-);
-
-export const submitSimulation = createAsyncThunk(
-  'simulations/submitSimulation',
-  async (id: string, { rejectWithValue }) => {
-    try {
-      const response = await API.put('GeosChemAPI', `/api/simulations/${id}/submit`, {});
-      return response;
-    } catch (error: any) {
-      return rejectWithValue(error.message || 'Failed to submit simulation');
     }
   }
 );
@@ -106,8 +100,10 @@ export const cancelSimulation = createAsyncThunk(
   'simulations/cancelSimulation',
   async (id: string, { rejectWithValue }) => {
     try {
-      const response = await API.put('GeosChemAPI', `/api/simulations/${id}/cancel`, {});
-      return response;
+      await simulationService.cancelSimulation(id);
+      // Fetch the updated simulation after cancellation
+      const updatedSimulation = await simulationService.getSimulation(id);
+      return updatedSimulation;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to cancel simulation');
     }
@@ -118,24 +114,10 @@ export const deleteSimulation = createAsyncThunk(
   'simulations/deleteSimulation',
   async (id: string, { rejectWithValue }) => {
     try {
-      await API.del('GeosChemAPI', `/api/simulations/${id}`, {});
+      await simulationService.deleteSimulation(id);
       return id;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Failed to delete simulation');
-    }
-  }
-);
-
-export const estimateSimulationCost = createAsyncThunk(
-  'simulations/estimateSimulationCost',
-  async (simulationConfig: Partial<Simulation['config']>, { rejectWithValue }) => {
-    try {
-      const response = await API.post('GeosChemAPI', '/api/configurations/cost-estimate', {
-        body: simulationConfig
-      });
-      return response;
-    } catch (error: any) {
-      return rejectWithValue(error.message || 'Failed to estimate simulation cost');
     }
   }
 );
@@ -180,7 +162,9 @@ const simulationsSlice = createSlice({
         state.error = null;
       })
       .addCase(fetchSimulations.fulfilled, (state, action) => {
-        state.simulations = action.payload;
+        state.simulations = action.payload.simulations;
+        state.count = action.payload.count;
+        state.nextToken = action.payload.nextToken;
         state.loading = false;
       })
       .addCase(fetchSimulations.rejected, (state, action) => {
@@ -208,34 +192,12 @@ const simulationsSlice = createSlice({
         state.error = null;
       })
       .addCase(createSimulation.fulfilled, (state, action) => {
-        state.simulations.push(action.payload);
+        state.simulations.unshift(action.payload);
         state.currentSimulation = action.payload;
+        state.count = state.count + 1;
         state.submitting = false;
       })
       .addCase(createSimulation.rejected, (state, action) => {
-        state.submitting = false;
-        state.error = action.payload as string;
-      })
-      
-      // Submit Simulation
-      .addCase(submitSimulation.pending, (state) => {
-        state.submitting = true;
-        state.error = null;
-      })
-      .addCase(submitSimulation.fulfilled, (state, action) => {
-        const updatedSimulation = action.payload;
-        const index = state.simulations.findIndex(
-          sim => sim.simulationId === updatedSimulation.simulationId
-        );
-        if (index !== -1) {
-          state.simulations[index] = updatedSimulation;
-        }
-        if (state.currentSimulation?.simulationId === updatedSimulation.simulationId) {
-          state.currentSimulation = updatedSimulation;
-        }
-        state.submitting = false;
-      })
-      .addCase(submitSimulation.rejected, (state, action) => {
         state.submitting = false;
         state.error = action.payload as string;
       })
@@ -274,26 +236,10 @@ const simulationsSlice = createSlice({
         if (state.currentSimulation?.simulationId === id) {
           state.currentSimulation = null;
         }
+        state.count = Math.max(0, state.count - 1);
         state.loading = false;
       })
       .addCase(deleteSimulation.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload as string;
-      })
-      
-      // Estimate Simulation Cost
-      .addCase(estimateSimulationCost.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(estimateSimulationCost.fulfilled, (state, action) => {
-        if (state.currentSimulation) {
-          state.currentSimulation.estimatedCost = action.payload.estimatedCost;
-          state.currentSimulation.estimatedRuntime = action.payload.estimatedRuntime;
-        }
-        state.loading = false;
-      })
-      .addCase(estimateSimulationCost.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
       });
