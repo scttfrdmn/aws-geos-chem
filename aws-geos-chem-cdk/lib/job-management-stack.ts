@@ -9,6 +9,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as batch from 'aws-cdk-lib/aws-batch';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as path from 'path';
 
 interface JobManagementStackProps extends cdk.StackProps {
@@ -16,6 +17,7 @@ interface JobManagementStackProps extends cdk.StackProps {
   usersBucket: s3.Bucket;
   systemBucket: s3.Bucket;
   jobQueue: batch.JobQueue;
+  userPool: cognito.IUserPool;
 }
 
 export class JobManagementStack extends cdk.Stack {
@@ -310,6 +312,13 @@ export class JobManagementStack extends cdk.Stack {
       }
     });
 
+    // Create Cognito authorizer for API Gateway
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'SimulationsApiAuthorizer', {
+      cognitoUserPools: [props.userPool],
+      authorizerName: 'CognitoAuthorizer',
+      identitySource: 'method.request.header.Authorization'
+    });
+
     // Create request validator
     const requestValidator = new apigateway.RequestValidator(this, 'RequestValidator', {
       restApi: this.api,
@@ -377,6 +386,8 @@ export class JobManagementStack extends cdk.Stack {
     });
 
     simulationsResource.addMethod('POST', submitIntegration, {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
       requestValidator,
       requestModels: {
         'application/json': simulationConfigModel
@@ -405,6 +416,8 @@ export class JobManagementStack extends cdk.Stack {
     });
 
     simulationsResource.addMethod('GET', listIntegration, {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
       requestParameters: {
         'method.request.querystring.status': false,
         'method.request.querystring.limit': false,
@@ -437,6 +450,8 @@ export class JobManagementStack extends cdk.Stack {
     });
 
     simulationResource.addMethod('GET', getIntegration, {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
       requestParameters: {
         'method.request.path.simulationId': true
       },
@@ -465,6 +480,8 @@ export class JobManagementStack extends cdk.Stack {
     });
 
     cancelResource.addMethod('POST', cancelIntegration, {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
       requestParameters: {
         'method.request.path.simulationId': true
       },

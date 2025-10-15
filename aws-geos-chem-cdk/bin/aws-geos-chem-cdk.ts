@@ -89,7 +89,8 @@ const jobManagementStack = new JobManagementStack(app, `${projectPrefix}-job-man
   simulationsTable: dataServicesStack.simulationsTable,
   usersBucket: dataServicesStack.usersBucket,
   systemBucket: dataServicesStack.systemBucket,
-  jobQueue: computeResourcesStack.jobQueue
+  jobQueue: computeResourcesStack.jobQueue,
+  userPool: authStack.userPool
 });
 
 const visualizationStack = new VisualizationStack(app, `${projectPrefix}-visualization`, {
