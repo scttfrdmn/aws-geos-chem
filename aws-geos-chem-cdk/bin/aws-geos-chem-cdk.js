@@ -46,6 +46,7 @@ const job_management_stack_1 = require("../lib/job-management-stack");
 const visualization_stack_1 = require("../lib/visualization-stack");
 const auth_stack_1 = require("../lib/auth-stack");
 const cost_tracking_stack_1 = require("../lib/cost-tracking-stack");
+const benchmarking_stack_1 = require("../lib/benchmarking-stack");
 const app = new cdk.App();
 // Load custom tags if available
 let customTags = {};
@@ -56,7 +57,7 @@ if (fs.existsSync(tagsPath)) {
         console.log('Loaded custom CDK tags:', customTags);
     }
     catch (error) {
-        console.warn('Error loading custom CDK tags:', error.message);
+        console.warn('Error loading custom CDK tags:', (error === null || error === void 0 ? void 0 : error.message) || 'Unknown error');
     }
 }
 // Environment configuration
@@ -113,7 +114,8 @@ const jobManagementStack = new job_management_stack_1.JobManagementStack(app, `$
     simulationsTable: dataServicesStack.simulationsTable,
     usersBucket: dataServicesStack.usersBucket,
     systemBucket: dataServicesStack.systemBucket,
-    jobQueue: computeResourcesStack.jobQueue
+    jobQueue: computeResourcesStack.jobQueue,
+    userPool: authStack.userPool
 });
 const visualizationStack = new visualization_stack_1.VisualizationStack(app, `${projectPrefix}-visualization`, {
     env,
@@ -125,6 +127,10 @@ const costTrackingStack = new cost_tracking_stack_1.CostTrackingStack(app, `${pr
     env,
     description: `Cost tracking and optimization services for GEOS-Chem AWS Cloud Runner (${environment})`,
     simulationsTable: dataServicesStack.simulationsTable
+});
+const benchmarkingStack = new benchmarking_stack_1.BenchmarkingStack(app, `${projectPrefix}-benchmarking`, {
+    env,
+    description: `Benchmarking services for GEOS-Chem AWS Cloud Runner (${environment})`
 });
 const webAppStack = new web_application_stack_1.WebApplicationStack(app, `${projectPrefix}-web-app`, {
     env,
@@ -144,6 +150,7 @@ webAppStack.addDependency(jobManagementStack);
 webAppStack.addDependency(visualizationStack);
 webAppStack.addDependency(authStack);
 webAppStack.addDependency(costTrackingStack);
+webAppStack.addDependency(benchmarkingStack);
 // Add tags to all resources - default tags
 cdk.Tags.of(app).add('Project', 'GEOS-Chem-Cloud-Runner');
 cdk.Tags.of(app).add('Environment', environment);

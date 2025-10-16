@@ -16,7 +16,7 @@ interface JobManagementStackProps extends cdk.StackProps {
   simulationsTable: dynamodb.Table;
   usersBucket: s3.Bucket;
   systemBucket: s3.Bucket;
-  jobQueue: batch.JobQueue;
+  jobQueue: batch.IJobQueue;
   userPool: cognito.IUserPool;
 }
 
@@ -115,8 +115,8 @@ export class JobManagementStack extends cdk.Stack {
         JOB_QUEUE_GRAVITON: 'geos-chem-graviton-queue',
         JOB_QUEUE_X86: 'geos-chem-x86-queue',
         ECR_REPOSITORY: `${cdk.Aws.ACCOUNT_ID}.dkr.ecr.${cdk.Aws.REGION}.amazonaws.com/geos-chem`,
-        AWS_REGION: cdk.Aws.REGION,
-        AWS_ACCOUNT_ID: cdk.Aws.ACCOUNT_ID
+        GEOS_REGION: cdk.Aws.REGION,
+        GEOS_ACCOUNT_ID: cdk.Aws.ACCOUNT_ID
       },
       timeout: cdk.Duration.seconds(30)
     });

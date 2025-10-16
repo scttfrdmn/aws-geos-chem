@@ -38,6 +38,7 @@ const cdk = __importStar(require("aws-cdk-lib"));
 const ec2 = __importStar(require("aws-cdk-lib/aws-ec2"));
 const iam = __importStar(require("aws-cdk-lib/aws-iam"));
 const s3 = __importStar(require("aws-cdk-lib/aws-s3"));
+const dynamodb = __importStar(require("aws-cdk-lib/aws-dynamodb"));
 /**
  * Core infrastructure stack for GEOS-Chem AWS Cloud Runner
  * Includes VPC, IAM roles, and base S3 bucket
@@ -86,12 +87,77 @@ class CoreInfrastructureStack extends cdk.Stack {
                 iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3ReadOnlyAccess')
             ]
         });
-        // Create S3 bucket for application data
+        // Create S3 buckets
         this.baseBucket = new s3.Bucket(this, 'GEOSChemBaseBucket', {
             versioned: true,
             encryption: s3.BucketEncryption.S3_MANAGED,
             blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
             removalPolicy: cdk.RemovalPolicy.RETAIN
+        });
+        this.usersBucket = new s3.Bucket(this, 'GEOSChemUsersBucket', {
+            bucketName: `geos-chem-users-${cdk.Aws.ACCOUNT_ID}`,
+            versioned: false,
+            encryption: s3.BucketEncryption.S3_MANAGED,
+            blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+            removalPolicy: cdk.RemovalPolicy.RETAIN,
+            lifecycleRules: [
+                {
+                    id: 'DeleteOldSimulations',
+                    enabled: true,
+                    expiration: cdk.Duration.days(90), // Delete simulation data after 90 days
+                    abortIncompleteMultipartUploadAfter: cdk.Duration.days(7)
+                }
+            ]
+        });
+        this.systemBucket = new s3.Bucket(this, 'GEOSChemSystemBucket', {
+            bucketName: `geos-chem-system-${cdk.Aws.ACCOUNT_ID}`,
+            versioned: true,
+            encryption: s3.BucketEncryption.S3_MANAGED,
+            blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+            removalPolicy: cdk.RemovalPolicy.RETAIN
+        });
+        // Create DynamoDB table for simulations
+        this.simulationsTable = new dynamodb.Table(this, 'SimulationsTable', {
+            tableName: 'geos-chem-simulations',
+            partitionKey: {
+                name: 'userId',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'simulationId',
+                type: dynamodb.AttributeType.STRING
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption: dynamodb.TableEncryption.AWS_MANAGED,
+            pointInTimeRecovery: true,
+            removalPolicy: cdk.RemovalPolicy.RETAIN,
+            stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES
+        });
+        // Add GSI for querying by status
+        this.simulationsTable.addGlobalSecondaryIndex({
+            indexName: 'userId-status-index',
+            partitionKey: {
+                name: 'userId',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'status',
+                type: dynamodb.AttributeType.STRING
+            },
+            projectionType: dynamodb.ProjectionType.ALL
+        });
+        // Add GSI for querying by creation date
+        this.simulationsTable.addGlobalSecondaryIndex({
+            indexName: 'userId-createdAt-index',
+            partitionKey: {
+                name: 'userId',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'createdAt',
+                type: dynamodb.AttributeType.STRING
+            },
+            projectionType: dynamodb.ProjectionType.ALL
         });
         // Output values
         new cdk.CfnOutput(this, 'VpcId', {
@@ -109,6 +175,21 @@ class CoreInfrastructureStack extends cdk.Stack {
         new cdk.CfnOutput(this, 'AvailabilityZones', {
             value: this.availabilityZones.join(','),
             description: 'Availability Zones used in the VPC'
+        });
+        new cdk.CfnOutput(this, 'SimulationsTableName', {
+            value: this.simulationsTable.tableName,
+            description: 'DynamoDB table for simulations',
+            exportName: 'GeosChemSimulationsTableName'
+        });
+        new cdk.CfnOutput(this, 'UsersBucketName', {
+            value: this.usersBucket.bucketName,
+            description: 'S3 bucket for user data',
+            exportName: 'GeosChemUsersBucketName'
+        });
+        new cdk.CfnOutput(this, 'SystemBucketName', {
+            value: this.systemBucket.bucketName,
+            description: 'S3 bucket for system data',
+            exportName: 'GeosChemSystemBucketName'
         });
     }
 }

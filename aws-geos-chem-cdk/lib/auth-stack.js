@@ -66,14 +66,11 @@ class AuthStack extends cdk.Stack {
                 familyName: {
                     required: true,
                     mutable: true
-                },
-                organization: {
-                    required: true,
-                    mutable: true
                 }
             },
             customAttributes: {
                 'institution': new cognito.StringAttribute({ mutable: true }),
+                'organization': new cognito.StringAttribute({ mutable: true }),
                 'researchArea': new cognito.StringAttribute({ mutable: true }),
                 'country': new cognito.StringAttribute({ mutable: true })
             },

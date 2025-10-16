@@ -40,6 +40,7 @@ const sfn = __importStar(require("aws-cdk-lib/aws-stepfunctions"));
 const tasks = __importStar(require("aws-cdk-lib/aws-stepfunctions-tasks"));
 const iam = __importStar(require("aws-cdk-lib/aws-iam"));
 const logs = __importStar(require("aws-cdk-lib/aws-logs"));
+const apigateway = __importStar(require("aws-cdk-lib/aws-apigateway"));
 const path = __importStar(require("path"));
 class JobManagementStack extends cdk.Stack {
     constructor(scope, id, props) {
@@ -86,16 +87,18 @@ class JobManagementStack extends cdk.Stack {
             resources: ['*']
         }));
         // Create Lambda functions for each step of the workflow
+        // Using job-management subdirectory for Lambda code
+        const lambdaCodePath = path.join(__dirname, 'lambda', 'job-management');
         this.submitSimulationLambda = new lambda.Function(this, 'SubmitSimulationHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'submit-simulation.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName,
                 USERS_BUCKET: props.usersBucket.bucketName,
                 SYSTEM_BUCKET: props.systemBucket.bucketName,
-                JOB_QUEUE: props.jobQueue.jobQueueName
+                STATE_MACHINE_ARN: '', // Will be set after state machine creation
             },
             timeout: cdk.Duration.seconds(30)
         });
@@ -103,7 +106,7 @@ class JobManagementStack extends cdk.Stack {
         const validateConfigurationLambda = new lambda.Function(this, 'ValidateConfigurationHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'validate-configuration.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName,
@@ -115,11 +118,15 @@ class JobManagementStack extends cdk.Stack {
         const submitBatchJobLambda = new lambda.Function(this, 'SubmitBatchJobHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'submit-batch-job.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName,
-                JOB_QUEUE: props.jobQueue.jobQueueName
+                JOB_QUEUE_GRAVITON: 'geos-chem-graviton-queue',
+                JOB_QUEUE_X86: 'geos-chem-x86-queue',
+                ECR_REPOSITORY: `${cdk.Aws.ACCOUNT_ID}.dkr.ecr.${cdk.Aws.REGION}.amazonaws.com/geos-chem`,
+                AWS_REGION: cdk.Aws.REGION,
+                AWS_ACCOUNT_ID: cdk.Aws.ACCOUNT_ID
             },
             timeout: cdk.Duration.seconds(30)
         });
@@ -127,7 +134,7 @@ class JobManagementStack extends cdk.Stack {
         const monitorJobStatusLambda = new lambda.Function(this, 'MonitorJobStatusHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'monitor-job-status.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName
@@ -138,7 +145,7 @@ class JobManagementStack extends cdk.Stack {
         const processResultsLambda = new lambda.Function(this, 'ProcessResultsHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'process-results.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName,
@@ -150,7 +157,7 @@ class JobManagementStack extends cdk.Stack {
         const updateSimulationStatusLambda = new lambda.Function(this, 'UpdateSimulationStatusHandler', {
             runtime: lambda.Runtime.NODEJS_18_X,
             handler: 'update-simulation-status.handler',
-            code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
+            code: lambda.Code.fromAsset(lambdaCodePath),
             role: lambdaExecutionRole,
             environment: {
                 SIMULATIONS_TABLE: props.simulationsTable.tableName
@@ -223,7 +230,262 @@ class JobManagementStack extends cdk.Stack {
                 level: sfn.LogLevel.ALL
             }
         });
+        // Update submit simulation Lambda with state machine ARN
+        this.submitSimulationLambda.addEnvironment('STATE_MACHINE_ARN', this.geosChemStateMachine.stateMachineArn);
+        // Grant permissions to start state machine
+        this.geosChemStateMachine.grantStartExecution(this.submitSimulationLambda);
+        // Create Lambda functions for API operations
+        // Get simulation status Lambda
+        const getSimulationLambda = new lambda.Function(this, 'GetSimulationHandler', {
+            runtime: lambda.Runtime.NODEJS_18_X,
+            handler: 'get-simulation.handler',
+            code: lambda.Code.fromAsset(lambdaCodePath),
+            role: lambdaExecutionRole,
+            environment: {
+                SIMULATIONS_TABLE: props.simulationsTable.tableName
+            },
+            timeout: cdk.Duration.seconds(30)
+        });
+        // List simulations Lambda
+        const listSimulationsLambda = new lambda.Function(this, 'ListSimulationsHandler', {
+            runtime: lambda.Runtime.NODEJS_18_X,
+            handler: 'list-simulations.handler',
+            code: lambda.Code.fromAsset(lambdaCodePath),
+            role: lambdaExecutionRole,
+            environment: {
+                SIMULATIONS_TABLE: props.simulationsTable.tableName
+            },
+            timeout: cdk.Duration.seconds(30)
+        });
+        // Cancel simulation Lambda
+        const cancelSimulationLambda = new lambda.Function(this, 'CancelSimulationHandler', {
+            runtime: lambda.Runtime.NODEJS_18_X,
+            handler: 'cancel-simulation.handler',
+            code: lambda.Code.fromAsset(lambdaCodePath),
+            role: lambdaExecutionRole,
+            environment: {
+                SIMULATIONS_TABLE: props.simulationsTable.tableName
+            },
+            timeout: cdk.Duration.seconds(30)
+        });
+        // Grant Step Functions permissions to cancel execution
+        this.geosChemStateMachine.grantExecution(cancelSimulationLambda, 'states:StopExecution');
+        // Create API Gateway REST API
+        this.api = new apigateway.RestApi(this, 'SimulationsApi', {
+            restApiName: 'GEOS-Chem Simulations API',
+            description: 'API for managing GEOS-Chem simulations',
+            deployOptions: {
+                stageName: 'prod',
+                tracingEnabled: true,
+                dataTraceEnabled: true,
+                loggingLevel: apigateway.MethodLoggingLevel.INFO,
+                metricsEnabled: true
+            },
+            defaultCorsPreflightOptions: {
+                allowOrigins: apigateway.Cors.ALL_ORIGINS,
+                allowMethods: apigateway.Cors.ALL_METHODS,
+                allowHeaders: [
+                    'Content-Type',
+                    'X-Amz-Date',
+                    'Authorization',
+                    'X-Api-Key',
+                    'X-Amz-Security-Token'
+                ],
+                allowCredentials: true
+            }
+        });
+        // Create Cognito authorizer for API Gateway
+        const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'SimulationsApiAuthorizer', {
+            cognitoUserPools: [props.userPool],
+            authorizerName: 'CognitoAuthorizer',
+            identitySource: 'method.request.header.Authorization'
+        });
+        // Create request validator
+        const requestValidator = new apigateway.RequestValidator(this, 'RequestValidator', {
+            restApi: this.api,
+            validateRequestBody: true,
+            validateRequestParameters: true
+        });
+        // Create API Gateway models for request/response validation
+        const simulationConfigModel = new apigateway.Model(this, 'SimulationConfigModel', {
+            restApi: this.api,
+            contentType: 'application/json',
+            description: 'Simulation configuration request model',
+            schema: {
+                type: apigateway.JsonSchemaType.OBJECT,
+                required: ['simulationType', 'startDate', 'endDate', 'resolution'],
+                properties: {
+                    simulationType: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        enum: ['GC_CLASSIC', 'GCHP']
+                    },
+                    startDate: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                    },
+                    endDate: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+                    },
+                    resolution: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        enum: ['4x5', '2x2.5', '0.5x0.625', 'C24', 'C48', 'C90', 'C180', 'C360']
+                    },
+                    chemistry: {
+                        type: apigateway.JsonSchemaType.STRING
+                    },
+                    processorType: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        enum: ['graviton4', 'graviton3', 'amd', 'intel']
+                    },
+                    instanceSize: {
+                        type: apigateway.JsonSchemaType.STRING,
+                        enum: ['small', 'medium', 'large', 'xlarge']
+                    },
+                    useSpot: {
+                        type: apigateway.JsonSchemaType.BOOLEAN
+                    }
+                }
+            }
+        });
+        // Create /simulations resource
+        const simulationsResource = this.api.root.addResource('simulations');
+        // POST /simulations - Submit new simulation
+        const submitIntegration = new apigateway.LambdaIntegration(this.submitSimulationLambda, {
+            proxy: true,
+            integrationResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': "'*'"
+                    }
+                }
+            ]
+        });
+        simulationsResource.addMethod('POST', submitIntegration, {
+            authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            requestValidator,
+            requestModels: {
+                'application/json': simulationConfigModel
+            },
+            methodResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': true
+                    }
+                }
+            ]
+        });
+        // GET /simulations - List all simulations for user
+        const listIntegration = new apigateway.LambdaIntegration(listSimulationsLambda, {
+            proxy: true,
+            integrationResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': "'*'"
+                    }
+                }
+            ]
+        });
+        simulationsResource.addMethod('GET', listIntegration, {
+            authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            requestParameters: {
+                'method.request.querystring.status': false,
+                'method.request.querystring.limit': false,
+                'method.request.querystring.nextToken': false
+            },
+            methodResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': true
+                    }
+                }
+            ]
+        });
+        // Create /simulations/{simulationId} resource
+        const simulationResource = simulationsResource.addResource('{simulationId}');
+        // GET /simulations/{simulationId} - Get specific simulation
+        const getIntegration = new apigateway.LambdaIntegration(getSimulationLambda, {
+            proxy: true,
+            integrationResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': "'*'"
+                    }
+                }
+            ]
+        });
+        simulationResource.addMethod('GET', getIntegration, {
+            authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            requestParameters: {
+                'method.request.path.simulationId': true
+            },
+            methodResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': true
+                    }
+                }
+            ]
+        });
+        // POST /simulations/{simulationId}/cancel - Cancel simulation
+        const cancelResource = simulationResource.addResource('cancel');
+        const cancelIntegration = new apigateway.LambdaIntegration(cancelSimulationLambda, {
+            proxy: true,
+            integrationResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': "'*'"
+                    }
+                }
+            ]
+        });
+        cancelResource.addMethod('POST', cancelIntegration, {
+            authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            requestParameters: {
+                'method.request.path.simulationId': true
+            },
+            methodResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Access-Control-Allow-Origin': true
+                    }
+                }
+            ]
+        });
+        // Create usage plan for throttling
+        const usagePlan = this.api.addUsagePlan('SimulationsApiUsagePlan', {
+            name: 'Standard Usage Plan',
+            description: 'Standard usage plan with rate limiting',
+            throttle: {
+                rateLimit: 100, // requests per second
+                burstLimit: 200 // maximum concurrent requests
+            },
+            quota: {
+                limit: 10000, // requests per period
+                period: apigateway.Period.DAY
+            }
+        });
+        usagePlan.addApiStage({
+            stage: this.api.deploymentStage
+        });
         // Output values
+        new cdk.CfnOutput(this, 'ApiUrl', {
+            value: this.api.url,
+            description: 'GEOS-Chem Simulations API URL',
+            exportName: 'GeosChemApiUrl'
+        });
         new cdk.CfnOutput(this, 'SubmitSimulationLambdaArn', {
             value: this.submitSimulationLambda.functionArn,
             description: 'ARN of the submit simulation Lambda function'

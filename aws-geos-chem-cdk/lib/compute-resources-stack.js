@@ -37,6 +37,7 @@ exports.ComputeResourcesStack = void 0;
 const cdk = __importStar(require("aws-cdk-lib"));
 const ec2 = __importStar(require("aws-cdk-lib/aws-ec2"));
 const batch = __importStar(require("aws-cdk-lib/aws-batch"));
+const ecs = __importStar(require("aws-cdk-lib/aws-ecs"));
 const iam = __importStar(require("aws-cdk-lib/aws-iam"));
 const ecr = __importStar(require("aws-cdk-lib/aws-ecr"));
 /**
@@ -135,113 +136,74 @@ class ComputeResourcesStack extends cdk.Stack {
             allowAllOutbound: true
         });
         // Create On-Demand Graviton compute environment for testing
-        const gravitonOnDemandEnvironment = new batch.ComputeEnvironment(this, 'GravitonOnDemandComputeEnv', {
-            computeResources: {
-                type: batch.ComputeResourceType.ON_DEMAND,
-                allocationStrategy: batch.AllocationStrategy.BEST_FIT,
-                vpc: props.vpc,
-                vpcSubnets: {
-                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-                },
-                securityGroups: [batchSG],
-                instanceTypes: gravitonInstances.slice(0, 2), // Use first 2 instance types
-                minvCpus: batchMinVcpu,
-                maxvCpus: Math.min(128, batchMaxVcpu), // Lower limit for on-demand
-                desiredvCpus: batchDesiredVcpu,
-                instanceRole: instanceProfile.attrArn
+        const gravitonOnDemandEnvironment = new batch.ManagedEc2EcsComputeEnvironment(this, 'GravitonOnDemandComputeEnv', {
+            vpc: props.vpc,
+            vpcSubnets: {
+                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
-            serviceRole: batchServiceRole,
-            enabled: true
+            securityGroups: [batchSG],
+            instanceTypes: gravitonInstances.slice(0, 2), // Use first 2 instance types
+            minvCpus: batchMinVcpu,
+            maxvCpus: Math.min(128, batchMaxVcpu), // Lower limit for on-demand
+            instanceRole,
+            useOptimalInstanceClasses: false
         });
         // Create Spot Graviton compute environment for cost savings
-        this.gravitonEnvironment = new batch.ComputeEnvironment(this, 'GravitonSpotComputeEnv', {
-            computeResources: {
-                type: batch.ComputeResourceType.SPOT,
-                allocationStrategy: batch.AllocationStrategy.SPOT_CAPACITY_OPTIMIZED,
-                vpc: props.vpc,
-                vpcSubnets: {
-                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-                },
-                securityGroups: [batchSG],
-                instanceTypes: gravitonInstances,
-                minvCpus: batchMinVcpu,
-                maxvCpus: batchMaxVcpu,
-                desiredvCpus: batchDesiredVcpu,
-                instanceRole: instanceProfile.attrArn,
-                spotFleetRole: new iam.LazyRole(this, 'SpotFleetServiceRole', {
-                    assumedBy: new iam.ServicePrincipal('spotfleet.amazonaws.com'),
-                    managedPolicies: [
-                        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonEC2SpotFleetTaggingRole')
-                    ]
-                })
+        this.gravitonEnvironment = new batch.ManagedEc2EcsComputeEnvironment(this, 'GravitonSpotComputeEnv', {
+            vpc: props.vpc,
+            vpcSubnets: {
+                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
-            serviceRole: batchServiceRole,
-            enabled: true
+            securityGroups: [batchSG],
+            instanceTypes: gravitonInstances,
+            minvCpus: batchMinVcpu,
+            maxvCpus: batchMaxVcpu,
+            instanceRole,
+            spot: true,
+            useOptimalInstanceClasses: false
         });
         // Create x86 compute environment
-        this.x86Environment = new batch.ComputeEnvironment(this, 'X86SpotComputeEnv', {
-            computeResources: {
-                type: batch.ComputeResourceType.SPOT,
-                allocationStrategy: batch.AllocationStrategy.SPOT_CAPACITY_OPTIMIZED,
-                vpc: props.vpc,
-                vpcSubnets: {
-                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-                },
-                securityGroups: [batchSG],
-                instanceTypes: x86Instances,
-                minvCpus: batchMinVcpu,
-                maxvCpus: batchMaxVcpu,
-                desiredvCpus: batchDesiredVcpu,
-                instanceRole: instanceProfile.attrArn,
-                spotFleetRole: new iam.LazyRole(this, 'X86SpotFleetServiceRole', {
-                    assumedBy: new iam.ServicePrincipal('spotfleet.amazonaws.com'),
-                    managedPolicies: [
-                        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonEC2SpotFleetTaggingRole')
-                    ]
-                })
+        this.x86Environment = new batch.ManagedEc2EcsComputeEnvironment(this, 'X86SpotComputeEnv', {
+            vpc: props.vpc,
+            vpcSubnets: {
+                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
-            serviceRole: batchServiceRole,
-            enabled: true
+            securityGroups: [batchSG],
+            instanceTypes: x86Instances,
+            minvCpus: batchMinVcpu,
+            maxvCpus: batchMaxVcpu,
+            instanceRole,
+            spot: true,
+            useOptimalInstanceClasses: false
         });
         // Create high-memory compute environment for memory-intensive simulations
-        this.highMemoryEnvironment = new batch.ComputeEnvironment(this, 'HighMemoryComputeEnv', {
-            computeResources: {
-                type: batch.ComputeResourceType.SPOT,
-                allocationStrategy: batch.AllocationStrategy.SPOT_CAPACITY_OPTIMIZED,
-                vpc: props.vpc,
-                vpcSubnets: {
-                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-                },
-                securityGroups: [batchSG],
-                instanceTypes: highMemInstances,
-                minvCpus: batchMinVcpu,
-                maxvCpus: batchHighMemMaxVcpu,
-                desiredvCpus: batchDesiredVcpu,
-                instanceRole: instanceProfile.attrArn,
-                spotFleetRole: new iam.LazyRole(this, 'HighMemSpotFleetServiceRole', {
-                    assumedBy: new iam.ServicePrincipal('spotfleet.amazonaws.com'),
-                    managedPolicies: [
-                        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonEC2SpotFleetTaggingRole')
-                    ]
-                })
+        this.highMemoryEnvironment = new batch.ManagedEc2EcsComputeEnvironment(this, 'HighMemoryComputeEnv', {
+            vpc: props.vpc,
+            vpcSubnets: {
+                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
-            serviceRole: batchServiceRole,
-            enabled: true
+            securityGroups: [batchSG],
+            instanceTypes: highMemInstances,
+            minvCpus: batchMinVcpu,
+            maxvCpus: batchHighMemMaxVcpu,
+            instanceRole,
+            spot: true,
+            useOptimalInstanceClasses: false
         });
         // Create job queue with priority for optimal cost/performance
         this.jobQueue = new batch.JobQueue(this, 'GEOSChemStandardJobQueue', {
             computeEnvironments: [
                 {
                     computeEnvironment: this.gravitonEnvironment, // Prefer Graviton for cost/performance
-                    order: 10
+                    order: 1
                 },
                 {
                     computeEnvironment: this.x86Environment,
-                    order: 20
+                    order: 2
                 },
                 {
                     computeEnvironment: gravitonOnDemandEnvironment, // Last resort, on-demand
-                    order: 30
+                    order: 3
                 }
             ],
             priority: 1,
@@ -252,15 +214,15 @@ class ComputeResourcesStack extends cdk.Stack {
             computeEnvironments: [
                 {
                     computeEnvironment: gravitonOnDemandEnvironment, // Use on-demand for high priority
-                    order: 10
+                    order: 1
                 },
                 {
                     computeEnvironment: this.gravitonEnvironment,
-                    order: 20
+                    order: 2
                 },
                 {
                     computeEnvironment: this.x86Environment,
-                    order: 30
+                    order: 3
                 }
             ],
             priority: 10,
@@ -287,38 +249,27 @@ class ComputeResourcesStack extends cdk.Stack {
             ]
         }));
         // Create job definition for GEOS-Chem on Graviton (ARM64)
-        this.gravitonJobDefinition = new batch.JobDefinition(this, 'GEOSChemGravitonJobDefinition', {
+        this.gravitonJobDefinition = new batch.EcsJobDefinition(this, 'GEOSChemGravitonJobDefinition', {
             jobDefinitionName: 'geos-chem-graviton',
-            container: {
-                image: batch.EcrImage.fromEcrRepository(this.containerRepository, 'graviton-latest'),
+            container: new batch.EcsEc2ContainerDefinition(this, 'GravitonContainer', {
+                image: ecs.ContainerImage.fromEcrRepository(this.containerRepository, 'graviton-latest'),
                 command: ['s3://gcgrid/GEOS_4x5/GEOS_FP/2016/01/', 'Ref::outputPath', 'Ref::configPath'],
-                vcpus: 4,
-                memoryLimitMiB: 8192,
+                cpu: 4,
+                memory: cdk.Size.mebibytes(8192),
                 volumes: [
-                    {
-                        host: {
-                            sourcePath: '/tmp'
-                        },
-                        name: 'scratch'
-                    }
-                ],
-                mountPoints: [
-                    {
-                        containerPath: '/scratch',
-                        sourceVolume: 'scratch',
-                        readOnly: false
-                    }
+                    batch.EcsVolume.host({
+                        name: 'scratch',
+                        hostPath: '/tmp',
+                        containerPath: '/scratch'
+                    })
                 ],
                 privileged: true,
-                jobRole: jobRole,
-                linuxParameters: {
-                    sharedMemorySize: 4096 // 4GB shared memory
-                },
+                jobRole,
                 environment: {
                     'AWS_REGION': this.region
                 },
                 readonlyRootFilesystem: false
-            },
+            }),
             timeout: cdk.Duration.hours(24),
             retryAttempts: 1,
             parameters: {
@@ -327,38 +278,27 @@ class ComputeResourcesStack extends cdk.Stack {
             }
         });
         // Create job definition for GEOS-Chem on x86
-        this.x86JobDefinition = new batch.JobDefinition(this, 'GEOSChemX86JobDefinition', {
+        this.x86JobDefinition = new batch.EcsJobDefinition(this, 'GEOSChemX86JobDefinition', {
             jobDefinitionName: 'geos-chem-x86',
-            container: {
-                image: batch.EcrImage.fromEcrRepository(this.containerRepository, 'x86-latest'),
+            container: new batch.EcsEc2ContainerDefinition(this, 'X86Container', {
+                image: ecs.ContainerImage.fromEcrRepository(this.containerRepository, 'x86-latest'),
                 command: ['s3://gcgrid/GEOS_4x5/GEOS_FP/2016/01/', 'Ref::outputPath', 'Ref::configPath'],
-                vcpus: 4,
-                memoryLimitMiB: 8192,
+                cpu: 4,
+                memory: cdk.Size.mebibytes(8192),
                 volumes: [
-                    {
-                        host: {
-                            sourcePath: '/tmp'
-                        },
-                        name: 'scratch'
-                    }
-                ],
-                mountPoints: [
-                    {
-                        containerPath: '/scratch',
-                        sourceVolume: 'scratch',
-                        readOnly: false
-                    }
+                    batch.EcsVolume.host({
+                        name: 'scratch',
+                        hostPath: '/tmp',
+                        containerPath: '/scratch'
+                    })
                 ],
                 privileged: true,
-                jobRole: jobRole,
-                linuxParameters: {
-                    sharedMemorySize: 4096 // 4GB shared memory
-                },
+                jobRole,
                 environment: {
                     'AWS_REGION': this.region
                 },
                 readonlyRootFilesystem: false
-            },
+            }),
             timeout: cdk.Duration.hours(24),
             retryAttempts: 1,
             parameters: {
@@ -367,38 +307,27 @@ class ComputeResourcesStack extends cdk.Stack {
             }
         });
         // Create high-memory job definition for GEOS-Chem
-        const highMemJobDefinition = new batch.JobDefinition(this, 'GEOSChemHighMemJobDefinition', {
+        const highMemJobDefinition = new batch.EcsJobDefinition(this, 'GEOSChemHighMemJobDefinition', {
             jobDefinitionName: 'geos-chem-high-memory',
-            container: {
-                image: batch.EcrImage.fromEcrRepository(this.containerRepository, 'graviton-latest'),
+            container: new batch.EcsEc2ContainerDefinition(this, 'HighMemContainer', {
+                image: ecs.ContainerImage.fromEcrRepository(this.containerRepository, 'graviton-latest'),
                 command: ['s3://gcgrid/GEOS_4x5/GEOS_FP/2016/01/', 'Ref::outputPath', 'Ref::configPath'],
-                vcpus: 8,
-                memoryLimitMiB: 32768, // 32GB memory
+                cpu: 8,
+                memory: cdk.Size.mebibytes(32768), // 32GB memory
                 volumes: [
-                    {
-                        host: {
-                            sourcePath: '/tmp'
-                        },
-                        name: 'scratch'
-                    }
-                ],
-                mountPoints: [
-                    {
-                        containerPath: '/scratch',
-                        sourceVolume: 'scratch',
-                        readOnly: false
-                    }
+                    batch.EcsVolume.host({
+                        name: 'scratch',
+                        hostPath: '/tmp',
+                        containerPath: '/scratch'
+                    })
                 ],
                 privileged: true,
-                jobRole: jobRole,
-                linuxParameters: {
-                    sharedMemorySize: 8192 // 8GB shared memory
-                },
+                jobRole,
                 environment: {
                     'AWS_REGION': this.region
                 },
                 readonlyRootFilesystem: false
-            },
+            }),
             timeout: cdk.Duration.hours(24),
             retryAttempts: 1,
             parameters: {

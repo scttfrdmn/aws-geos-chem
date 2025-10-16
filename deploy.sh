@@ -21,6 +21,12 @@ export AWS_REGION=us-west-2
 export ENV=dev
 export PROJECT_PREFIX=geos-chem
 
+# Save project root directory
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CDK_DIR="$PROJECT_ROOT/aws-geos-chem-cdk"
+CONTAINER_DIR="$PROJECT_ROOT/container"
+WEB_DIR="$PROJECT_ROOT/web-interface"
+
 # Logging
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -72,20 +78,22 @@ check_prerequisites() {
 bootstrap_cdk() {
     log_info "Bootstrapping CDK (if not already done)..."
 
-    cd aws-geos-chem-cdk
+    cd "$CDK_DIR"
 
     if cdk bootstrap aws://$ACCOUNT_ID/$AWS_REGION --profile $AWS_PROFILE 2>&1 | grep -q "already bootstrapped"; then
         log_info "CDK already bootstrapped"
     else
         log_info "CDK bootstrap complete"
     fi
+
+    cd "$PROJECT_ROOT"
 }
 
 # Deploy Authentication Stack
 deploy_auth() {
     log_info "Deploying Authentication Stack..."
 
-    cd aws-geos-chem-cdk
+    cd "$CDK_DIR"
     npm run build
 
     cdk deploy $PROJECT_PREFIX-auth \
@@ -108,13 +116,15 @@ deploy_auth() {
         echo "export USER_POOL_ID=$USER_POOL_ID" > .env.deploy
         echo "export CLIENT_ID=$CLIENT_ID" >> .env.deploy
     fi
+
+    cd "$PROJECT_ROOT"
 }
 
 # Deploy Data Services Stack
 deploy_data() {
     log_info "Deploying Data Services Stack..."
 
-    cd aws-geos-chem-cdk
+    cd "$CDK_DIR"
 
     cdk deploy $PROJECT_PREFIX-data \
         --require-approval never \
@@ -123,6 +133,8 @@ deploy_data() {
         --region $AWS_REGION
 
     log_info "Data services stack deployed"
+
+    cd "$PROJECT_ROOT"
 }
 
 # Build and push Docker containers
@@ -155,7 +167,7 @@ build_containers() {
     aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE | \
         docker login --username AWS --password-stdin $ECR_REPO
 
-    cd container
+    cd "$CONTAINER_DIR"
 
     # Build ARM64 container
     log_info "Building ARM64 container..."
@@ -183,14 +195,14 @@ build_containers() {
         log_info "AMD64 container pushed"
     fi
 
-    cd ..
+    cd "$PROJECT_ROOT"
 }
 
 # Deploy Compute Resources Stack
 deploy_compute() {
     log_info "Deploying Compute Resources Stack..."
 
-    cd aws-geos-chem-cdk
+    cd "$CDK_DIR"
 
     # Set Graviton4 instance types
     export GRAVITON_INSTANCE_TYPES=c8g.4xlarge,c8g.8xlarge
@@ -203,13 +215,15 @@ deploy_compute() {
         --region $AWS_REGION
 
     log_info "Compute resources stack deployed"
+
+    cd "$PROJECT_ROOT"
 }
 
 # Deploy Job Management Stack
 deploy_job_management() {
     log_info "Deploying Job Management Stack..."
 
-    cd aws-geos-chem-cdk
+    cd "$CDK_DIR"
 
     cdk deploy $PROJECT_PREFIX-job-management \
         --require-approval never \
@@ -226,13 +240,15 @@ deploy_job_management() {
 
         echo "export API_URL=$API_URL" >> .env.deploy
     fi
+
+    cd "$PROJECT_ROOT"
 }
 
 # Create test user
 create_test_user() {
     log_info "Creating test user..."
 
-    source aws-geos-chem-cdk/.env.deploy
+    source "$CDK_DIR/.env.deploy"
 
     # Create user
     if aws cognito-idp admin-create-user \
@@ -267,7 +283,7 @@ create_test_user() {
 test_api() {
     log_info "Testing API..."
 
-    source aws-geos-chem-cdk/.env.deploy
+    source "$CDK_DIR/.env.deploy"
 
     # Get token
     TOKEN=$(aws cognito-idp admin-initiate-auth \
@@ -305,9 +321,9 @@ test_api() {
 generate_frontend_config() {
     log_info "Generating frontend configuration..."
 
-    source aws-geos-chem-cdk/.env.deploy
+    source "$CDK_DIR/.env.deploy"
 
-    cat > web-interface/src/aws-exports.ts << EOF
+    cat > "$WEB_DIR/src/aws-exports.ts" << EOF
 const awsmobile = {
   aws_project_region: '${AWS_REGION}',
   aws_cognito_region: '${AWS_REGION}',
@@ -325,7 +341,7 @@ const awsmobile = {
 export default awsmobile;
 EOF
 
-    log_info "Frontend configuration generated: web-interface/src/aws-exports.ts"
+    log_info "Frontend configuration generated: $WEB_DIR/src/aws-exports.ts"
 }
 
 # Main deployment flow
@@ -340,7 +356,7 @@ main() {
     ACCOUNT_ID=$(aws sts get-caller-identity --profile $AWS_PROFILE --query Account --output text)
 
     # Create outputs directory
-    mkdir -p aws-geos-chem-cdk/outputs
+    mkdir -p "$CDK_DIR/outputs"
 
     # Deploy stacks
     bootstrap_cdk
@@ -366,7 +382,7 @@ main() {
     log_info "API URL: $API_URL"
     log_info "User Pool ID: $USER_POOL_ID"
     log_info ""
-    log_info "Configuration saved to: aws-geos-chem-cdk/.env.deploy"
+    log_info "Configuration saved to: $CDK_DIR/.env.deploy"
 }
 
 # Run main function
